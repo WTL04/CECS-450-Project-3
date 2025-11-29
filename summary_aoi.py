@@ -1,54 +1,64 @@
 import pandas as pd
 
-AOI_LIST = [
-    "AI",
-    "Alt_VSI",
-    "ASI",
-    "SSI",
-    "TI_HSI",
-    "RPM",
-    "Window",
-    "NoAOI"
-]
+# Path to your dataset
+CSV_PATH = "datasets/AOI_DGMs.csv"
 
-def load_and_summarize(csv_path):
-    df = pd.read_csv(csv_path)
+def extract_aoi_prefix(col_name: str):
+    """
+    Get the AOI prefix from a column like:
+    'AI_Proportion_of_fixations_spent_in_AOI'
+    Returns 'AI'
+    """
+    if "_Proportion_of_fixations" in col_name:
+        return col_name.split("_Proportion_of_fixations")[0]
+    return None
 
-    # Ensure we have a success label
-    if "pilot_success" in df.columns:
-        df["Group"] = df["pilot_success"].apply(
-            lambda x: "Successful" if x == 1 else "Unsuccessful"
-        )
-    else:
-        df["Group"] = df["Approach_Score"].apply(
-            lambda x: "Successful" if x >= 0.7 else "Unsuccessful"
-        )
 
-    rows = []
+def summarize_aoi_metrics(df: pd.DataFrame):
+    """
+    Create a clean AOI summary table using the wide-format dataset.
+    Output DataFrame columns:
+        AOI, Group, prop_fixations, prop_fix_durations
+    """
 
-    for aoi in AOI_LIST:
+    # Identify AOI columns by suffix
+    fix_cols = [c for c in df.columns if "Proportion_of_fixations_spent_in_AOI" in c]
+    dur_cols = [c for c in df.columns if "Proportion_of_fixations_durations_spent_in_AOI" in c]
+
+    # Extract AOI names by prefix
+    aois = sorted(set(extract_aoi_prefix(c) for c in fix_cols if extract_aoi_prefix(c)))
+
+    records = []
+
+    for aoi in aois:
         fix_col = f"{aoi}_Proportion_of_fixations_spent_in_AOI"
         dur_col = f"{aoi}_Proportion_of_fixations_durations_spent_in_AOI"
 
+        # Protect against missing columns
         if fix_col not in df.columns or dur_col not in df.columns:
-            print(f"Skipping AOI {aoi}: missing columns")
             continue
 
-        for group_name, group_df in df.groupby("Group"):
-            row = {
+        # Group by pilot success
+        for group, group_df in df.groupby("pilot_success"):
+            records.append({
                 "AOI": aoi,
-                "Group": group_name,
+                "Group": "Successful" if group == 1 else "Unsuccessful",
                 "prop_fixations": group_df[fix_col].mean(),
-                "prop_fix_dur": group_df[dur_col].mean()
-            }
-            rows.append(row)
+                "prop_fix_durations": group_df[dur_col].mean()
+            })
 
-    summary_df = pd.DataFrame(rows)
-    print(summary_df)
-    print("\nTotal rows in summary:", len(summary_df))
-    return summary_df
+    return pd.DataFrame(records)
+
+
+def main():
+    df = pd.read_csv(CSV_PATH)
+
+    summary = summarize_aoi_metrics(df)
+
+    print(summary)
+    print("\nTotal rows:", len(summary))
+
 
 if __name__ == "__main__":
-    csv_path = "datasets/AOI_DGMs.csv"
-    summary_df = load_and_summarize(csv_path)
+    main()
 
