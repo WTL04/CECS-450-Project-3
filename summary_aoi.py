@@ -1,82 +1,78 @@
 import pandas as pd
 
-def load_data(path):
-    """Load dataset and ensure success label exists."""
-    df = pd.read_csv(path)
+def load_data(csv_path):
+    df = pd.read_csv(csv_path)
 
-    # Use existing label
+    # Convert "#NULL!" → NaN
+    df = df.replace("#NULL!", pd.NA)
+
+    # Convert entire dataset to numeric where possible
+    df = df.apply(pd.to_numeric, errors="ignore")
+
+    # Derive success group if needed
     if "pilot_success" in df.columns:
-        df["Group"] = df["pilot_success"].replace({1: "Successful", 0: "Unsuccessful"})
+        df["Group"] = df["pilot_success"].apply(
+            lambda x: "Successful" if x == 1 else "Unsuccessful"
+        )
     else:
-        df["Group"] = df["Approach_Score"].apply(lambda x: "Successful" if x >= 0.7 else "Unsuccessful")
+        df["Group"] = df["Approach_Score"].apply(
+            lambda x: "Successful" if x >= 0.7 else "Unsuccessful"
+        )
 
     return df
 
 
-def find_aoi_columns(df):
+def extract_aoi_prefix(colname):
     """
-    Automatically detect AOI names by column prefixes.
-    Example columns:
-        AI_Proportion_of_fixations_spent_in_AOI
-        ASI_Proportion_of_fixations_spent_in_AOI
-        RPM_Proportion_of_fixations_spent_in_AOI
+    Example:
+    'AI_Proportion_of_fixations_spent_in_AOI' → 'AI'
+    'Alt_Proportion_of_fixations_spent_in_AOI' → 'Alt'
     """
-    aoi_cols = {}
-
-    for col in df.columns:
-        if col.endswith("Proportion_of_fixations_spent_in_AOI"):
-            aoi = col.split("_")[0]  # AOI prefix before the first underscore
-            aoi_cols.setdefault(aoi, {})
-            aoi_cols[aoi]["fix_prop"] = col
-
-        if col.endswith("Proportion_of_fixations_durations_spent_in_AOI"):
-            aoi = col.split("_")[0]
-            aoi_cols.setdefault(aoi, {})
-            aoi_cols[aoi]["dur_prop"] = col
-
-    return aoi_cols
+    return colname.split("_")[0]
 
 
-def summarize(df, aoi_cols):
-    """Compute mean proportions for each AOI, separately for each group."""
-    rows = []
+def summarize(df):
+    # Identify proportion columns
+    prop_cols = [
+        c for c in df.columns
+        if "Proportion_of_fixations_spent_in_AOI" in c
+    ]
 
-    for aoi, cols in aoi_cols.items():
-        fix_col = cols.get("fix_prop")
-        dur_col = cols.get("dur_prop")
+    # Extract AOI  from prefixes
+    aoi_list = sorted({extract_aoi_prefix(c) for c in prop_cols})
 
-        if fix_col is None and dur_col is None:
-            continue
+    summary_rows = []
 
-        for group, group_df in df.groupby("Group"):
-            row = {
+    for aoi in aoi_list:
+        # Find the correct column for this AOI
+        fix_col = [
+            c for c in prop_cols if c.startswith(aoi + "_")
+        ][0]
+
+        # Compute means for success & unsuccessful
+        for group in ["Successful", "Unsuccessful"]:
+            group_df = df[df["Group"] == group]
+
+            mean_prop = pd.to_numeric(group_df[fix_col], errors="coerce").mean()
+
+            summary_rows.append({
                 "AOI": aoi,
                 "Group": group,
-                "prop_fixations": group_df[fix_col].mean() if fix_col else None,
-                "prop_fix_dur": group_df[dur_col].mean() if dur_col else None
-            }
-            rows.append(row)
+                "mean_prop_fixations": mean_prop
+            })
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(summary_rows)
 
 
 def main():
     csv_path = "datasets/AOI_DGMs.csv"
 
     df = load_data(csv_path)
-    aoi_cols = find_aoi_columns(df)
-    summary_df = summarize(df, aoi_cols)
+    summary_df = summarize(df)
 
     print(summary_df)
-    print("\nTotal rows:", len(summary_df))
+    print("\nTotal rows in summary:", len(summary_df))
 
 
 if __name__ == "__main__":
     main()
-
-    print("\nTotal rows:", len(summary))
-
-
-if __name__ == "__main__":
-    main()
-
