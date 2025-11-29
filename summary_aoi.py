@@ -1,7 +1,6 @@
 import networkx as nx
 import plotly.graph_objects as go
-
-from summary_aoi import load_and_summarize
+import pandas as pd
 
 
 def build_aoi_hover_text(summary_df):
