@@ -94,7 +94,7 @@ def plot_aoi_attention(csv_path: str, success_filter: str = "all", output: str |
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Plot AOI attention distribution from eye tracking CSV.")
-    parser.add_argument("--csv", default="AOI_DGMs.csv", help="Path to AOI CSV file (default: AOI_DGMs.csv)")
+    parser.add_argument("--csv", default="./datasets/AOI_DGMs.csv", help="Path to AOI CSV file (default: AOI_DGMs.csv)")
     parser.add_argument("--filter", default="all", help="Success filter: all | successful | unsuccessful")
     parser.add_argument("--output", help="Optional path to save HTML plot instead of only showing it")
     parser.add_argument("--no-show", action="store_true", help="Do not open interactive window; only save if --output provided")
@@ -114,3 +114,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
