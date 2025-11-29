@@ -1,77 +1,103 @@
 import pandas as pd
 
-def load_data(csv_path):
-    df = pd.read_csv(csv_path)
 
-    # Convert "#NULL!" → NaN
-    df = df.replace("#NULL!", pd.NA)
+def load_aoi_data(csv_path: str) -> pd.DataFrame:
+    """
+    Load the AOI_DGMs.csv file and create a Group column
+    based on Approach_Score.
 
-    # Convert entire dataset to numeric where possible
-    df = df.apply(pd.to_numeric, errors="ignore")
+    Group rules (from project spec):
+    - Successful: Approach_Score >= 0.7
+    - Unsuccessful: Approach_Score < 0.7
+    """
+    # Treat '#NULL!' as a missing value
+    df = pd.read_csv(csv_path, na_values=["#NULL!"])
 
-    # Derive success group if needed
-    if "pilot_success" in df.columns:
-        df["Group"] = df["pilot_success"].apply(
-            lambda x: "Successful" if x == 1 else "Unsuccessful"
-        )
-    else:
-        df["Group"] = df["Approach_Score"].apply(
-            lambda x: "Successful" if x >= 0.7 else "Unsuccessful"
-        )
+    if "Approach_Score" not in df.columns:
+        raise ValueError("Expected an 'Approach_Score' column in the CSV.")
+
+    # Create a simple group label for each pilot
+    df["Group"] = df["Approach_Score"].apply(
+        lambda s: "Successful" if s >= 0.7 else "Unsuccessful"
+    )
 
     return df
 
 
-def extract_aoi_prefix(colname):
+def find_aoi_columns(df: pd.DataFrame) -> dict:
     """
-    Example:
-    'AI_Proportion_of_fixations_spent_in_AOI' → 'AI'
-    'Alt_Proportion_of_fixations_spent_in_AOI' → 'Alt'
+    Find all AOI columns of the form:
+
+        <AOI_NAME>_Proportion_of_fixations_spent_in_AOI
+
+    and return a dictionary mapping:
+        AOI_NAME -> column_name
     """
-    return colname.split("_")[0]
+    aoi_cols = {}
+
+    for col in df.columns:
+        if col.endswith("_Proportion_of_fixations_spent_in_AOI"):
+            # Everything before '_Proportion_of_fixations_spent_in_AOI'
+            aoi_name = col.replace("_Proportion_of_fixations_spent_in_AOI", "")
+            aoi_cols[aoi_name] = col
+
+    if not aoi_cols:
+        raise ValueError(
+            "Could not find any AOI proportion columns. "
+            "Expected columns ending with '_Proportion_of_fixations_spent_in_AOI'."
+        )
+
+    return aoi_cols
 
 
-def summarize(df):
-    # Identify proportion columns
-    prop_cols = [
-        c for c in df.columns
-        if "Proportion_of_fixations_spent_in_AOI" in c
-    ]
+def load_and_summarize(csv_path: str) -> pd.DataFrame:
+    """
+    Load the AOI data and compute, for each AOI and each Group,
+    the mean proportion of fixations spent in that AOI.
 
-    # Extract AOI  from prefixes
-    aoi_list = sorted({extract_aoi_prefix(c) for c in prop_cols})
+    Returns a DataFrame with columns:
+        - AOI
+        - Group
+        - prop_fixations
+    """
+    df = load_aoi_data(csv_path)
+    aoi_cols = find_aoi_columns(df)
 
-    summary_rows = []
+    rows = []
 
-    for aoi in aoi_list:
-        # Find the correct column for this AOI
-        fix_col = [
-            c for c in prop_cols if c.startswith(aoi + "_")
-        ][0]
+    for aoi_name, col_name in aoi_cols.items():
+        # Convert this AOI column to numeric, ignoring any non-numeric junk
+        series_all = pd.to_numeric(df[col_name], errors="coerce")
 
-        # Compute means for success & unsuccessful
-        for group in ["Successful", "Unsuccessful"]:
-            group_df = df[df["Group"] == group]
+        # Attach back to df so we can group by Group
+        df["_current_aoi_prop"] = series_all
 
-            mean_prop = pd.to_numeric(group_df[fix_col], errors="coerce").mean()
+        # Group by Success / Unsuccessful and take the mean for this AOI
+        for group_name, group_df in df.groupby("Group"):
+            mean_prop = group_df["_current_aoi_prop"].mean()
 
-            summary_rows.append({
-                "AOI": aoi,
-                "Group": group,
-                "mean_prop_fixations": mean_prop
-            })
+            rows.append(
+                {
+                    "AOI": aoi_name,
+                    "Group": group_name,
+                    "prop_fixations": mean_prop,
+                }
+            )
 
-    return pd.DataFrame(summary_rows)
+    # Clean up the temporary column
+    if "_current_aoi_prop" in df.columns:
+        df.drop(columns=["_current_aoi_prop"], inplace=True)
+
+    summary = pd.DataFrame(rows)
+    return summary
 
 
 def main():
     csv_path = "datasets/AOI_DGMs.csv"
-
-    df = load_data(csv_path)
-    summary_df = summarize(df)
+    summary_df = load_and_summarize(csv_path)
 
     print(summary_df)
-    print("\nTotal rows in summary:", len(summary_df))
+    print(f"\nTotal rows in summary: {len(summary_df)}")
 
 
 if __name__ == "__main__":
