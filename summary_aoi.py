@@ -16,7 +16,7 @@ def load_aoi_data(csv_path: str) -> pd.DataFrame:
     if "Approach_Score" not in df.columns:
         raise ValueError("Expected an 'Approach_Score' column in the CSV.")
 
-    # Create a simple group label for each pilot
+    # group label for each pilot
     df["Group"] = df["Approach_Score"].apply(
         lambda s: "Successful" if s >= 0.7 else "Unsuccessful"
     )
@@ -66,13 +66,13 @@ def load_and_summarize(csv_path: str) -> pd.DataFrame:
     rows = []
 
     for aoi_name, col_name in aoi_cols.items():
-        # Convert this AOI column to numeric, ignoring any non-numeric junk
+        # Convert this AOI column to numeric
         series_all = pd.to_numeric(df[col_name], errors="coerce")
 
         # Attach back to df so we can group by Group
         df["_current_aoi_prop"] = series_all
 
-        # Group by Success / Unsuccessful and take the mean for this AOI
+        # Group by Success Unsuccessful
         for group_name, group_df in df.groupby("Group"):
             mean_prop = group_df["_current_aoi_prop"].mean()
 
@@ -84,7 +84,7 @@ def load_and_summarize(csv_path: str) -> pd.DataFrame:
                 }
             )
 
-    # Clean up the temporary column
+    
     if "_current_aoi_prop" in df.columns:
         df.drop(columns=["_current_aoi_prop"], inplace=True)
 
@@ -98,6 +98,8 @@ def main():
 
     print(summary_df)
     print(f"\nTotal rows in summary: {len(summary_df)}")
+
+    summary_df.to_csv("datasets/AOI_summary.csv", index=False)
 
 
 if __name__ == "__main__":
