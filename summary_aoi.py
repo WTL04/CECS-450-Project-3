@@ -1,6 +1,5 @@
 import pandas as pd
 
-# Path to your dataset
 CSV_PATH = "datasets/AOI_DGMs.csv"
 
 def extract_aoi_prefix(col_name: str):
@@ -21,11 +20,11 @@ def summarize_aoi_metrics(df: pd.DataFrame):
         AOI, Group, prop_fixations, prop_fix_durations
     """
 
-    # Identify AOI columns by suffix
+    
     fix_cols = [c for c in df.columns if "Proportion_of_fixations_spent_in_AOI" in c]
     dur_cols = [c for c in df.columns if "Proportion_of_fixations_durations_spent_in_AOI" in c]
 
-    # Extract AOI names by prefix
+    
     aois = sorted(set(extract_aoi_prefix(c) for c in fix_cols if extract_aoi_prefix(c)))
 
     records = []
@@ -34,11 +33,11 @@ def summarize_aoi_metrics(df: pd.DataFrame):
         fix_col = f"{aoi}_Proportion_of_fixations_spent_in_AOI"
         dur_col = f"{aoi}_Proportion_of_fixations_durations_spent_in_AOI"
 
-        # Protect against missing columns
+        
         if fix_col not in df.columns or dur_col not in df.columns:
             continue
 
-        # Group by pilot success
+        
         for group, group_df in df.groupby("pilot_success"):
             records.append({
                 "AOI": aoi,
