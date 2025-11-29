@@ -1,0 +1,116 @@
+import argparse
+import sys
+from pathlib import Path
+import pandas as pd
+import plotly.express as px
+
+AOI_PREFIXES = {
+    "NoAOI": "A - No AOI",
+    "Alt_VSI": "B - Alt_VSI",
+    "AI": "C - AI",
+    "TI_HSI": "D - TI_HSI",
+    "SSI": "E - SSI",
+    "ASI": "F - ASI",
+    "RPM": "G - RPM",
+    "Window": "H - Window",
+}
+
+
+def normalize_success(value) -> str:
+    s = str(value).strip().lower()
+    if s in {"1", "successful", "success", "true", "yes"}:
+        return "Successful"
+    return "Unsuccessful"
+
+
+def build_viz_dataframe(df: pd.DataFrame, success_filter: str) -> pd.DataFrame:
+    success_filter = success_filter.lower()
+    records = []
+    for prefix, label in AOI_PREFIXES.items():
+        col = f"{prefix}_Proportion_of_fixations_spent_in_AOI"
+        if col not in df.columns:
+            continue
+        for _, row in df.iterrows():
+            status = normalize_success(row.get("pilot_success"))
+            if success_filter in {"successful", "success"} and status != "Successful":
+                continue
+            if success_filter in {"unsuccessful", "fail", "failed"} and status != "Unsuccessful":
+                continue
+            records.append({
+                "AOI": label,
+                "pilot_success": status,
+                "proportion_fixations": row[col]
+            })
+    viz_df = pd.DataFrame(records)
+    if viz_df.empty:
+        return viz_df
+    viz_df["proportion_fixations"] = (
+        viz_df["proportion_fixations"].astype(str).str.strip().str.replace("%", "", regex=False)
+    )
+    viz_df["proportion_fixations"] = pd.to_numeric(viz_df["proportion_fixations"], errors="coerce")
+    return viz_df.dropna(subset=["proportion_fixations"])
+
+
+def plot_aoi_attention(csv_path: str, success_filter: str = "all", output: str | None = None, show: bool = True):
+    csv_file = Path(csv_path)
+    if not csv_file.exists():
+        print(f"CSV not found: {csv_path}")
+        return 1
+
+    df = pd.read_csv(csv_file)
+    data = build_viz_dataframe(df, success_filter)
+    if data.empty:
+        print("No data matched filter or no numeric proportion values found.")
+        return 2
+
+    summary_df = (data
+                  .groupby(["AOI", "pilot_success"], as_index=False)["proportion_fixations"]
+                  .mean())
+
+    title_filter_part = "All" if success_filter == "all" else success_filter.capitalize()
+    fig = px.bar(
+        summary_df,
+        x="AOI",
+        y="proportion_fixations",
+        color="pilot_success",
+        barmode="group",
+        title=f"AOI Attention Distribution (Proportion of Fixations) - {title_filter_part}",
+        labels={"proportion_fixations": "Mean Proportion of Fixations"}
+    )
+
+    if output:
+        out_path = Path(output)
+        try:
+            fig.write_html(out_path)
+            print(f"Saved interactive HTML plot to: {out_path}\nOpen in a browser to view.")
+        except Exception as e:
+            print(f"Failed to save HTML output: {e}")
+
+    if show:
+        fig.show()
+
+    return 0
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(description="Plot AOI attention distribution from eye tracking CSV.")
+    parser.add_argument("--csv", default="AOI_DGMs.csv", help="Path to AOI CSV file (default: AOI_DGMs.csv)")
+    parser.add_argument("--filter", default="all", help="Success filter: all | successful | unsuccessful")
+    parser.add_argument("--output", help="Optional path to save HTML plot instead of only showing it")
+    parser.add_argument("--no-show", action="store_true", help="Do not open interactive window; only save if --output provided")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv or sys.argv[1:])
+    code = plot_aoi_attention(
+        csv_path=args.csv,
+        success_filter=args.filter,
+        output=args.output,
+        show=not args.no_show,
+    )
+    sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()
