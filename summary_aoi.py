@@ -12,15 +12,13 @@ def load_and_summarize(csv_path="datasets/AOI_DGMs.csv"):
     - prop_fix_dur: average proportion of fixation duration spent in that AOI
     """
 
-    # Read the full wide table (one row per pilot)
+   
     df = pd.read_csv(csv_path)
 
     if "pilot_success" not in df.columns:
         raise ValueError("Expected a 'pilot_success' column in AOI_DGMs.csv")
 
-    # Find AOI prefixes automatically from columns like:
-    #   AI_Proportion_of_fixations_spent_in_AOI
-    #   RPM_Proportion_of_fixations_spent_in_AOI
+  
     aoi_prefixes = set()
     for col in df.columns:
         if col.endswith("_Proportion_of_fixations_spent_in_AOI"):
@@ -38,7 +36,7 @@ def load_and_summarize(csv_path="datasets/AOI_DGMs.csv"):
 
     rows = []
 
-    # For each AOI and each success group, compute averages
+    # For each AOI & success group 
     for aoi in aoi_prefixes:
         col_fix_prop = f"{aoi}_Proportion_of_fixations_spent_in_AOI"
         col_dur_prop = f"{aoi}_Proportion_of_fixations_durations_spent_in_AOI"
@@ -47,7 +45,7 @@ def load_and_summarize(csv_path="datasets/AOI_DGMs.csv"):
             # Skip AOIs that don't have both proportion columns
             continue
 
-        # Split by pilot_success (e.g., Successful vs Unsuccessful)
+        # Split by pilot success 
         for group_name, group_df in df.groupby("pilot_success"):
             row = {
                 "AOI": aoi,
