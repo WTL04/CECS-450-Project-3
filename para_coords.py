@@ -19,6 +19,9 @@ def select_dgms(df: pd.DataFrame, keywords: list, aoi: str):
 
 
 def filter_success(df: pd.DataFrame):
+    """
+    Split root dataframe into two dataframes, successful and unsuccessful
+    """
     df_successful = df[df["pilot_success"] == "Successful"].copy()
     df_unsuccessful = df[df["pilot_success"] == "Unsuccessful"].copy()
     return df_successful, df_unsuccessful
@@ -38,10 +41,8 @@ def main():
     ]
 
     aoi_list = ["AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window", "No_AOI"]
-
-    fig = go.Figure()
-    buttons = []
-    trace_index = 0  # number of actual AOIs that produced traces
+    aoi_traces = []
+    trace_visibility_map = []
 
     for aoi in aoi_list:
         # select fixation DGMs for this AOI
@@ -82,38 +83,52 @@ def main():
             dict(label=col.replace("_", " "), values=result[col]) for col in dims_cols
         ]
 
-        # add one Parcoords trace per AOI (only first visible)
-        fig.add_trace(
-            go.Parcoords(
-                line=dict(
-                    color=result["pilot_success_code"],
-                    colorscale=[[0, "firebrick"], [1, "royalblue"]],
-                    showscale=False,
-                ),
-                dimensions=dimensions,
-                visible=(trace_index == 0),
-            )
+        aoi_traces.append(
+            {
+                "aoi": aoi,
+                "dimensions": dimensions,
+                # store the color array (one value per row) as a plain Python list
+                "color": result["pilot_success_code"].tolist(),
+            }
         )
 
-        # create a button that turns this AOI trace on, others off
+        trace_visibility_map.append(aoi)
+
+    if not aoi_traces:
+        # nothing to show
+        return
+
+    # create a single Parcoords trace with the first AOI's data
+    first = aoi_traces[0]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Parcoords(
+            line=dict(
+                color=first["color"],
+                colorscale=[[0, "firebrick"], [1, "royalblue"]],
+                showscale=False,
+            ),
+            dimensions=first["dimensions"],
+        )
+    )
+
+    # Build buttons that restyle the single trace's dimensions and line color,
+    # and update the title. Using one trace avoids overlayed axes/labels.
+    buttons = []
+    for item in aoi_traces:
         buttons.append(
             dict(
-                label=aoi,
+                label=item["aoi"],
                 method="update",
                 args=[
-                    # visibility mask for all traces
-                    {"visible": [i == trace_index for i in range(len(aoi_list))]},
-                    # layout update: title
-                    {"title": f"Parallel Coordinates – AOI: {aoi}"},
+                    {"dimensions": [item["dimensions"]], "line.color": [item["color"]]},
+                    {"title": {"text": f"Parallel Coordinates – AOI: {item['aoi']}"}},
                 ],
             )
         )
 
-        trace_index += 1
-
-    # attach dropdown menu
     fig.update_layout(
-        title="Parallel Coordinates – AOI: (select from dropdown)",
+        title=f"Parallel Coordinates – AOI: {trace_visibility_map[0]}",
         updatemenus=[
             dict(
                 type="dropdown",
@@ -129,5 +144,4 @@ def main():
     fig.show()
 
 
-if __name__ == "__main__":
-    main()
+main()
