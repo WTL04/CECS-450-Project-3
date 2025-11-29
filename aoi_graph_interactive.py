@@ -80,7 +80,7 @@ def build_aoi_graph(csv_path):
 
 if __name__ == "__main__":
     # Update this path to match your dataset.
-    aoi_csv = "datasets/OPTION_A_AOI_DGMs.csv"
+    aoi_csv = "datasets/AOI_DGMs.csv"
     fig = build_aoi_graph(aoi_csv)
     fig.show()
 # builds the AOI network graph and adds hover text for each AOI.
