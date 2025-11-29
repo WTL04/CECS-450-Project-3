@@ -1,87 +1,160 @@
+import pandas as pd
 import networkx as nx
 import plotly.graph_objects as go
-import pandas as pd
-
-from summary_aoi import load_and_summarize
 
 
-def build_hover_text(summary_df):
+def load_aoi_summary(csv_path: str = "datasets/AOI_summary.csv") -> pd.DataFrame:
     """
-    Create the hover text for each AOI using the summary statistics.
+    Load the AOI summary file created by summary_aoi.py.
+
+    Expected columns:
+        - AOI  (e.g., 'Alt_VSI', 'AI', 'TI_HSI', 'ASI', 'SSI', 'RPM', 'Window', 'NoAOI')
+        - Group ('Successful' or 'Unsuccessful')
+        - prop_fixations (float)
+
+    Returns
+    -------
+    df : pd.DataFrame
     """
-    hover = {}
+    df = pd.read_csv(csv_path)
+
+    required_cols = {"AOI", "Group", "prop_fixations"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"AOI_summary.csv is missing columns: {missing}")
+
+    return df
+
+
+def build_hover_text(summary_df: pd.DataFrame) -> dict:
+    """
+    Build a mapping from AOI -> hover text string.
+
+    Hover text example:
+
+        AOI TI_HSI
+        Successful: 0.2009
+        Unsuccessful: 0.1708
+
+    Returns
+    -------
+    hover_by_aoi : dict[str, str]
+    """
+    hover_by_aoi: dict[str, str] = {}
 
     for aoi, group_df in summary_df.groupby("AOI"):
-        text_lines = [f"<b>AOI: {aoi}</b>"]
+        lines = [f"<b>{aoi}</b>"]
+        for _, row in group_df.iterrows():
+            group_name = row["Group"]
+            value = row["prop_fixations"]
+            lines.append(f"<br>{group_name}: {value:.4f}")
+        hover_by_aoi[aoi] = "".join(lines)
 
-        for group_name, row in group_df.set_index("Group").iterrows():
-            text_lines.append(f"<br><b>{group_name}</b>")
-
-            if "fixation_count" in row:
-                text_lines.append(f"<br>Avg fixations: {row['fixation_count']:.2f}")
-
-            if "mean_fix_dur" in row:
-                text_lines.append(f"<br>Avg fixation duration: {row['mean_fix_dur']:.3f}")
-
-            if "prop_fixations" in row:
-                text_lines.append(f"<br>Fixation proportion: {row['prop_fixations']:.3f}")
-
-            if "prop_fix_dur" in row:
-                text_lines.append(f"<br>Duration proportion: {row['prop_fix_dur']:.3f}")
-
-        hover[aoi] = "".join(text_lines)
-
-    return hover
+    return hover_by_aoi
 
 
-def build_aoi_graph(csv_path):
+def build_aoi_graph(summary_df: pd.DataFrame) -> go.Figure:
     """
-    Build a simple AOI network graph with hover text for each node.
-    """
-    # Load AOI-level summary data.
-    summary = load_and_summarize(csv_path)
-    hover_text = build_hover_text(summary)
+    Construct an AOI network visualization using NetworkX and Plotly.
 
-    # Create a graph with one node per AOI.
+    Nodes: AOIs
+    Edges: simple ring connections between AOIs (visual only)
+    """
+    hover_by_aoi = build_hover_text(summary_df)
+
+    # List AOIs
+    aois = sorted(summary_df["AOI"].unique().tolist())
+
+    # undirected graph
     G = nx.Graph()
-    for aoi in summary["AOI"].unique():
+    for aoi in aois:
         G.add_node(aoi)
 
-    # Layout the nodes.
+    # (AOI[i] -> AOI[i+1]) + last -> firstt
+    if len(aois) > 1:
+        for i in range(len(aois)):
+            src = aois[i]
+            tgt = aois[(i + 1) % len(aois)]
+            G.add_edge(src, tgt)
+
+    # AOIs form a ring
     pos = nx.circular_layout(G)
 
-    # Extract node positions.
-    xs = [pos[node][0] for node in G.nodes()]
-    ys = [pos[node][1] for node in G.nodes()]
-    texts = [hover_text.get(node, f"AOI: {node}") for node in G.nodes()]
+    # Build edge traces
+    edge_x = []
+    edge_y = []
+    for src, tgt in G.edges():
+        x0, y0 = pos[src]
+        x1, y1 = pos[tgt]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
 
-    # Build Plotly scatter for nodes.
-    node_trace = go.Scatter(
-        x=xs,
-        y=ys,
-        mode="markers+text",
-        text=[str(n) for n in G.nodes()],
-        textposition="top center",
-        hoverinfo="text",
-        hovertext=texts,
-        marker=dict(size=20, line=dict(width=2))
+    edge_trace = go.Scatter(
+        x=edge_x,
+        y=edge_y,
+        mode="lines",
+        line=dict(width=1),
+        hoverinfo="none",
+        showlegend=False,
     )
 
-    fig = go.Figure(data=[node_trace])
-    fig.update_layout(
-        title="AOI Graph with Hover Details",
+    # nodetrace 
+    node_x = []
+    node_y = []
+    node_text = []
+    node_hover = []
+
+    for aoi in G.nodes():
+        x, y = pos[aoi]
+        node_x.append(x)
+        node_y.append(y)
+        node_text.append(aoi)
+        node_hover.append(hover_by_aoi.get(aoi, aoi))
+
+    node_trace = go.Scatter(
+        x=node_x,
+        y=node_y,
+        mode="markers+text",
+        text=node_text,
+        textposition="top center",
+        hoverinfo="text",
+        hovertext=node_hover,
+        marker=dict(
+            size=20,
+            line=dict(width=2),
+        ),
         showlegend=False,
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False)
+    )
+
+    fig = go.Figure(data=[edge_trace, node_trace])
+    fig.update_layout(
+        title="AOI Graph – Proportion of Fixations (Successful vs Unsuccessful)",
+        xaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+        ),
+        yaxis=dict(
+            showgrid=False,
+            zeroline=False,
+            showticklabels=False,
+        ),
+        plot_bgcolor="white",
     )
 
     return fig
 
 
-if __name__ == "__main__":
-    # Update this path to match your dataset.
-    aoi_csv = "datasets/AOI_DGMs.csv"
-    fig = build_aoi_graph(aoi_csv)
+def main():
+    # Load the summary 
+    summary_df = load_aoi_summary("datasets/AOI_summary.csv")
+
+    # interactive AOI graph
+    fig = build_aoi_graph(summary_df)
+
+    
     fig.show()
-# builds the AOI network graph and adds hover text for each AOI.
-# The hover text shows summary for successful and unsuccessful pilots.
+
+
+if __name__ == "__main__":
+    main()
