@@ -3,6 +3,7 @@ import numpy as np
 import plotly.graph_objects as go
 from aoi_dashboard import build_bar_figure
 from plotly.subplots import make_subplots
+import webbrowser  
 
 def select_dgms(df: pd.DataFrame, keywords: list, aoi: str):
     """
@@ -169,7 +170,6 @@ def main():
         showlegend=True,
         margin=dict(t=70, l=40, r=40, b=40),
         fig.write_html("temp_dashboard.html")
-        import webbrowser
         webbrowser.open("temp_dashboard.html")
     )
 
