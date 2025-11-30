@@ -1,117 +1,99 @@
 import dash
 from dash import dcc, html, Input, Output
-import os
+import plotly.graph_objects as go
+
+# AOIs (same as other scripts)
+AOI_LIST = [
+    "AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"
+]
+
+# AOI bounding box coordinates for cockpit overlay 
+AOI_COORDS = {
+    "AI":      {"x0": 250, "y0": 400, "x1": 320, "y1": 470, "label":"AI"},
+    "Alt_VSI": {"x0": 350, "y0": 400, "x1": 420, "y1": 470, "label":"Alt_VSI"},
+    "ASI":     {"x0": 250, "y0": 300, "x1": 320, "y1": 370, "label":"ASI"},
+    "SSI":     {"x0": 350, "y0": 300, "x1": 420, "y1": 370, "label":"SSI"},
+    "TI_HSI":  {"x0": 280, "y0": 500, "x1": 390, "y1": 570, "label":"TI_HSI"},
+    "RPM":     {"x0": 500, "y0": 400, "x1": 570, "y1": 470, "label":"RPM"},
+    "Window":  {"x0": 30, "y0": 60, "x1": 620, "y1": 200, "label":"Window"}
+}
+
+COCKPIT_IMAGE_PATH = "images/cockpit.png"  
+
 from aoibargraph import build_bar_figure
 from aoi_graph import build_main_figure
 
-def build_bar_figure(aoi):
-    import plotly.graph_objects as go
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=["Successful", "Unsuccessful"], y=[1.0, 0.5]))
-    fig.update_layout(title=f"Bar Chart - {aoi}")
-    return fig
-
-def build_main_figure(aoi):
-    import plotly.graph_objects as go
-    fig = go.Figure()
-    # Dummy lines
-    fig.add_trace(go.Scatter(x=[0,1,2], y=[aoi.count("A"), aoi.count("I"), aoi.count("O")], mode='lines+markers'))
-    fig.update_layout(title=f"Main Chart - {aoi}")
-    return fig
-
-
-AOI_REGIONS = {
-    'AI':        {'x0': 120, 'y0': 100, 'x1': 230, 'y1': 180},
-    'Alt_VSI':   {'x0': 340, 'y0': 100, 'x1': 460, 'y1': 180},
-    'ASI':       {'x0': 560, 'y0': 100, 'x1': 670, 'y1': 180},
-    'SSI':       {'x0': 330, 'y0': 200, 'x1': 470, 'y1': 380},
-    'TI_HSI':    {'x0': 50,  'y0': 0,   'x1': 750, 'y1': 80},
-    'RPM':       {'x0': 140, 'y0': 300, 'x1': 210, 'y1': 370},
-    'Window':    {'x0': 40,  'y0': 40,  'x1': 770, 'y1': 120},
-    'No_AOI':    {'x0': 400, 'y0': 400, 'x1': 450, 'y1': 440}
-}
-AOI_LIST = list(AOI_REGIONS.keys())
-IMG_PATH = "./images/cockpit.png"   # Put your cockpit image here!
-
 app = dash.Dash(__name__)
 
-def cockpit_figure(selected_aoi=None):
-    import plotly.graph_objects as go
+def cockpit_figure(selected_aoi):
+    # Uses the local file path; Dash loves base64 and PIL for local images, but here we use direct image inclusion for local dev
     fig = go.Figure()
+    # Add cockpit image
     fig.add_layout_image(
         dict(
-            source=IMG_PATH,
+            source=COCKPIT_IMAGE_PATH,
             xref="x", yref="y",
             x=0, y=0,
-            sizex=800, sizey=449,
+            sizex=650, sizey=600,
             layer="below"
         )
     )
-    # Add AOI box
-    for aoi, box in AOI_REGIONS.items():
-        line_col = "red" if aoi != selected_aoi else "green"
-        opac = 0.2 if aoi != selected_aoi else 0.4
+    # Draw all AOI rectangles, highlight selected
+    for aoi, coords in AOI_COORDS.items():
+        boxcolor = "green" if aoi == selected_aoi else "red"
+        opacity = 0.4 if aoi == selected_aoi else 0.2
         fig.add_shape(
             type="rect",
-            x0=box['x0'], y0=box['y0'], x1=box['x1'], y1=box['y1'],
-            line_color=line_col,
-            fillcolor=line_col,
-            opacity=opac,
+            x0=coords["x0"], y0=coords["y0"],
+            x1=coords["x1"], y1=coords["y1"],
+            line=dict(color=boxcolor, width=3 if aoi == selected_aoi else 2),
+            fillcolor=boxcolor,
+            opacity=opacity,
         )
         fig.add_annotation(
-            x=(box['x0'] + box['x1']) / 2,
-            y=box['y1'] + 16,
-            text=aoi,
+            x=(coords["x0"] + coords["x1"]) / 2,
+            y=coords["y0"] - 8,
+            text=coords["label"],
             showarrow=False,
-            font={'color': 'white', 'size': 11},
-            bgcolor=line_col
+            font=dict(color='white' if aoi == selected_aoi else 'black'),
+            bgcolor=boxcolor
         )
-    fig.update_xaxes(visible=False, range=[0,800])
-    fig.update_yaxes(visible=False, range=[0,449])
+    fig.update_xaxes(visible=False, range=[0, 650])
+    fig.update_yaxes(visible=False, range=[0, 600])
     fig.update_layout(
+        title="Cockpit AOI Map",
         margin=dict(l=0, r=0, t=30, b=0),
-        title="Cockpit AOI Map (Click a box to update charts)",
-        height=480,
-        width=800,
-        dragmode=False,
-        clickmode='event+select'
+        height=400,
+        width=650,
     )
     return fig
 
 app.layout = html.Div([
     html.Div([
-        dcc.Graph(
-            id='cockpit-image',
-            figure=cockpit_figure(selected_aoi=AOI_LIST[0]),
-            config={"staticPlot": False}
+        html.H3("AOI Dashboard"),
+        html.Label("Select AOI:"),
+        dcc.Dropdown(
+            id="aoi-dropdown",
+            options=[{"label": AOI_COORDS[aoi]["label"], "value": aoi} for aoi in AOI_LIST],
+            value="SSI",
+            clearable=False
         ),
-        html.H4("Click an AOI region above to update charts", style={'textAlign':'center'})
-    ], style={'width':'48%', 'display':'inline-block', 'verticalAlign':'top'}),
+        dcc.Graph(id="cockpit-image", figure=cockpit_figure("SSI")),
+    ], style={'width': '39%', 'display': 'inline-block', 'verticalAlign': 'top'}),
     html.Div([
-        dcc.Graph(id='bar-chart', figure=build_bar_figure(AOI_LIST[0])),
-        dcc.Graph(id='main-chart', figure=build_main_figure(AOI_LIST[0])),
-    ], style={'width':'48%', 'display':'inline-block', 'verticalAlign':'top'}),
-], style={'display':'flex', 'gap':'12px'})
+        dcc.Graph(id="bar-chart"),
+        dcc.Graph(id="main-chart"),
+    ], style={'width':'59%', 'display':'inline-block', 'verticalAlign':'top'}),
+])
 
 @app.callback(
+    Output('cockpit-image', 'figure'),
     Output('bar-chart', 'figure'),
     Output('main-chart', 'figure'),
-    Output('cockpit-image', 'figure'),
-    Input('cockpit-image', 'clickData'),
+    Input('aoi-dropdown', 'value')
 )
-def update_on_click(clickData):
-    selected_aoi = AOI_LIST[0]
-    if clickData and 'points' in clickData and len(clickData['points']) > 0:
-        xval = clickData['points'][0].get('x')
-        yval = clickData['points'][0].get('y')
-        for aoi, box in AOI_REGIONS.items():
-            if xval is not None and yval is not None \
-                and box['x0'] <= xval <= box['x1'] \
-                and box['y0'] <= yval <= box['y1']:
-                selected_aoi = aoi
-                break
-
-    return build_bar_figure(selected_aoi), build_main_figure(selected_aoi), cockpit_figure(selected_aoi)
+def update_all(selected_aoi):
+    return cockpit_figure(selected_aoi), build_bar_figure(selected_aoi), build_main_figure(selected_aoi)
 
 if __name__ == "__main__":
     app.run_server(debug=True)
