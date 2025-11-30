@@ -281,7 +281,7 @@ fig.update_layout(
     showlegend=True,
 )
 
-# Optionally: Add extra annotation below the dashboard title if you want per-plot instructions
+
 fig.add_annotation(
     text="Use the AOI dropdown above the parallel coordinates plot (left) to switch instruments.",
     x=0.23, y=1.07, xref="paper", yref="paper",
