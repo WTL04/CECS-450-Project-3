@@ -1,7 +1,8 @@
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-
+from aoi_dashboard import build_bar_figure
+from plotly.subplots import make_subplots
 
 def select_dgms(df: pd.DataFrame, keywords: list, aoi: str):
     """
@@ -141,8 +142,34 @@ def main():
         ],
     )
 
+def main():
+    # ... all your AOI/Parcoords construction code ...
+    fig_par.update_layout(...)  # rename fig to fig_par for clarity
+
+    from aoi_dashboard import build_bar_figure
+    from plotly.subplots import make_subplots
+    
+    fig_bar = build_bar_figure("./datasets/AOI_DGMs.csv")
+
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        specs=[[{"type": "parcoords"}, {"type": "xy"}]],
+        column_widths=[0.7, 0.3],
+        horizontal_spacing=0.08,
+        subplot_titles=("", "AOI Bar Chart"))
+    
+    fig.add_trace(fig_par.data[0], row=1, col=1)
+    for trace in fig_bar.data:
+        fig.add_trace(trace, row=1, col=2)
+    fig.update_layout(
+        title_text="AOI Dashboard: Parallel Coordinates (left) + AOI Bar Chart (right)",
+        height=600,
+        width=1100,
+        showlegend=True,
+        margin=dict(t=70, l=40, r=40, b=40),
+    )
+
     fig.show()
-
-
-if __name__ == "__main__":
+    if __name__ == "__main__":
     main()
