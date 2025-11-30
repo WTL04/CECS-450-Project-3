@@ -78,13 +78,6 @@ def plot_aoi_attention(csv_path: str, success_filter: str = "all", output: str |
         labels={"proportion_fixations": "Mean Proportion of Fixations"}
     )
 
-    fig.update_traces(
-    hovertemplate=
-        "AOI: %{x}<br>" +
-        "Pilot Success: %{marker.color}<br>" +
-        "Proportion of Fixations: %{y:.3f}<br>" +
-        "<extra></extra>"
-    )
     
     if output:
         out_path = Path(output)
@@ -122,5 +115,6 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
 
 
