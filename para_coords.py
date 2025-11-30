@@ -169,10 +169,9 @@ def main():
         width=1100,
         showlegend=True,
         margin=dict(t=70, l=40, r=40, b=40),
-        fig.write_html("temp_dashboard.html")
-        webbrowser.open("temp_dashboard.html")
     )
-
-    fig.show()
+fig.write_html("temp_dashboard.html")
+webbrowser.open("temp_dashboard.html")
+    # fig.show()
     if __name__ == "__main__":
         main()
