@@ -17,7 +17,6 @@ AOI_PREFIXES = {
     "Window": "H - Window",
 }
 
-
 def normalize_success(value) -> str:
     """
     Convert pilot_success / flags into 'Successful' or 'Unsuccessful'.
@@ -27,24 +26,18 @@ def normalize_success(value) -> str:
         return "Successful"
     return "Unsuccessful"
 
-
-# 1) BAR CHART FIGURE SUCCESS vs UNSUCCESSFUL
-def build_bar_figure(csv_path: str = "./datasets/AOI_DGMs.csv",
-                     success_filter: str = "all") -> go.Figure:
+def build_bar_figure(csv_path: str = "./datasets/AOI_DGMs.csv", success_filter: str = "all") -> go.Figure:
     """
     Build the grouped bar chart:
         x = AOI
         y = mean proportion of fixations
         color = Successful vs Unsuccessful
-
-    This uses the same logic as aoi_graph.py but returns a Plotly figure.
     """
     csv_file = Path(csv_path)
     if not csv_file.exists():
         raise FileNotFoundError(f"CSV not found: {csv_path}")
 
     df = pd.read_csv(csv_file)
-
     success_filter = success_filter.lower()
     records = []
 
@@ -55,7 +48,6 @@ def build_bar_figure(csv_path: str = "./datasets/AOI_DGMs.csv",
 
         for _, row in df.iterrows():
             status = normalize_success(row.get("pilot_success"))
-            # Apply optional filter
             if success_filter in {"successful", "success"} and status != "Successful":
                 continue
             if success_filter in {"unsuccessful", "fail", "failed"} and status != "Unsuccessful":
@@ -73,7 +65,6 @@ def build_bar_figure(csv_path: str = "./datasets/AOI_DGMs.csv",
     if viz_df.empty:
         raise ValueError("No data matched filter or no numeric proportion values found.")
 
-    # Clean up and convert to numeric
     viz_df["proportion_fixations"] = (
         viz_df["proportion_fixations"]
         .astype(str)
@@ -85,7 +76,6 @@ def build_bar_figure(csv_path: str = "./datasets/AOI_DGMs.csv",
     )
     viz_df = viz_df.dropna(subset=["proportion_fixations"])
 
-    # Group by AOI + success
     summary_df = (
         viz_df
         .groupby(["AOI", "pilot_success"], as_index=False)["proportion_fixations"]
@@ -104,7 +94,6 @@ def build_bar_figure(csv_path: str = "./datasets/AOI_DGMs.csv",
         labels={"proportion_fixations": "Mean Proportion of Fixations"},
     )
 
-    # Nice hover 
     fig_bar.update_traces(
         hovertemplate=(
             "AOI: %{x}<br>"
@@ -115,9 +104,6 @@ def build_bar_figure(csv_path: str = "./datasets/AOI_DGMs.csv",
     )
 
     return fig_bar
-
-
-# 2) PARALLEL COORDS FIGURE (PER AOI, SUCCESS vs FAIL)
 
 def select_dgms(df: pd.DataFrame, keywords: list, aoi: str) -> pd.DataFrame:
     """
@@ -131,16 +117,13 @@ def select_dgms(df: pd.DataFrame, keywords: list, aoi: str) -> pd.DataFrame:
         full_pattern = rf"({keyword_pattern})"
     return df.filter(regex=full_pattern, axis=1)
 
-
 def filter_success(df: pd.DataFrame):
     """
     Split root dataframe into two dataframes, successful and unsuccessful.
-    Assumes 'pilot_success' already in the CSV.
     """
     df_successful = df[df["pilot_success"] == "Successful"].copy()
     df_unsuccessful = df[df["pilot_success"] == "Unsuccessful"].copy()
     return df_successful, df_unsuccessful
-
 
 def build_parcoords_figure(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figure:
     """
@@ -152,13 +135,12 @@ def build_parcoords_figure(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figu
     df_successful, df_unsuccessful = filter_success(df)
 
     fixation_keywords = [
-        "Proportion_of_fixations_spent_in_AOI",  # how often AOI checked
-        "Proportion_of_fixations_durations_spent_in_AOI",  # how long AOI viewed
+        "Proportion_of_fixations_spent_in_AOI",
+        "Proportion_of_fixations_durations_spent_in_AOI",
         "Total_Number_of_Fixations",
         "Mean_fixation_duration",
     ]
 
-    
     aoi_list = ["AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window", "NoAOI"]
     aoi_traces = []
     trace_visibility_map = []
@@ -170,7 +152,6 @@ def build_parcoords_figure(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figu
         if fix_df_successful.empty and fix_df_unsuccessful.empty:
             continue
 
-        # attach pilot_success
         fix_df_successful["pilot_success"] = df_successful["pilot_success"].values
         fix_df_unsuccessful["pilot_success"] = df_unsuccessful["pilot_success"].values
 
@@ -180,7 +161,6 @@ def build_parcoords_figure(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figu
             ignore_index=True,
         )
 
-        # numeric code for color: 1 = successful, 0 = unsuccessful
         result["pilot_success_code"] = (result["pilot_success"] == "Successful").astype(int)
 
         numeric_cols = result.select_dtypes(include=np.number).columns.tolist()
@@ -253,9 +233,6 @@ def build_parcoords_figure(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figu
 
     return fig_par
 
-
-
-# 3) COMBINED DASHBOARD 
 def build_dashboard(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figure:
     """
     Create a single figure with:
@@ -265,49 +242,37 @@ def build_dashboard(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figure:
     fig_par = build_parcoords_figure(csv_path)
     fig_bar = build_bar_figure(csv_path, success_filter="all")
 
-    # combined layout
     fig = make_subplots(
-    rows=1,
-    cols=2,
-    specs=[[{"type": "parcoords"}, {"type": "xy"}]],
-    subplot_titles=("", ""),  # <-- Make subplot titles empty!
-    horizontal_spacing=0.12,
-)
+        rows=1,
+        cols=2,
+        specs=[[{"type": "parcoords"}, {"type": "xy"}]],
+        subplot_titles=("", ""),
+        horizontal_spacing=0.12,
+    )
 
-fig.update_layout(
-    title_text="AOI Gaze Dashboard: Parallel Coordinates (left) + AOI Bar Chart (right)",
-    height=600,
-    width=1200,
-    showlegend=True,
-)
-
-
-fig.add_annotation(
-    text="Use the AOI dropdown above the parallel coordinates plot (left) to switch instruments.",
-    x=0.23, y=1.07, xref="paper", yref="paper",
-    showarrow=False, font=dict(size=14),
-)
-
-    # left: parcoords just one trace
     fig.add_trace(fig_par.data[0], row=1, col=1)
-
-    # right: all bar chart traces
     for trace in fig_bar.data:
         fig.add_trace(trace, row=1, col=2)
 
     fig.update_layout(
+        title_text="AOI Gaze Dashboard: Parallel Coordinates (left) + AOI Bar Chart (right)",
         height=600,
         width=1200,
         showlegend=True,
+        margin=dict(t=80, l=40, r=40, b=40)
+    )
+
+    fig.add_annotation(
+        text="Select AOI from dropdown above the left plot. Hover over right bars to view tooltip metrics.",
+        x=0.5, y=1.07, xref="paper", yref="paper",
+        showarrow=False, font=dict(size=14),
     )
 
     return fig
 
-
 if __name__ == "__main__":
     dash_fig = build_dashboard("./datasets/AOI_DGMs.csv")
     dash_fig.show()
-    # Optional: save to HTML so your team / professor can open it easily
     Path("outputs").mkdir(exist_ok=True)
     dash_fig.write_html("outputs/aoi_dashboard.html")
     print("Saved dashboard to outputs/aoi_dashboard.html")
