@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from aoi_graph_interactive import run_aoi_graph
-import argparse
+
 
 def select_dgms(df: pd.DataFrame, keywords: list, aoi: str):
     """
@@ -146,18 +145,4 @@ def main():
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Visualization runner for Project 3"
-    )
-    parser.add_argument(
-        "--view",
-        choices=["para", "aoi"],
-        default="para",
-        help="para = parallel coordinates (default), aoi = AOI graph"
-    )
-    args = parser.parse_args()
-
-    if args.view == "para":
-        main()
-    else:
-        run_aoi_graph()
+    main()
