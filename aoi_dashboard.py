@@ -267,15 +267,26 @@ def build_dashboard(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figure:
 
     # combined layout
     fig = make_subplots(
-        rows=1,
-        cols=2,
-        specs=[[{"type": "parcoords"}, {"type": "xy"}]],
-        subplot_titles=(
-            fig_par.layout.title.text or "Parallel Coordinates",
-            fig_bar.layout.title.text or "AOI Bar Chart",
-        ),
-        horizontal_spacing=0.12,
-    )
+    rows=1,
+    cols=2,
+    specs=[[{"type": "parcoords"}, {"type": "xy"}]],
+    subplot_titles=("", ""),  # <-- Make subplot titles empty!
+    horizontal_spacing=0.12,
+)
+
+fig.update_layout(
+    title_text="AOI Gaze Dashboard: Parallel Coordinates (left) + AOI Bar Chart (right)",
+    height=600,
+    width=1200,
+    showlegend=True,
+)
+
+# Optionally: Add extra annotation below the dashboard title if you want per-plot instructions
+fig.add_annotation(
+    text="Use the AOI dropdown above the parallel coordinates plot (left) to switch instruments.",
+    x=0.23, y=1.07, xref="paper", yref="paper",
+    showarrow=False, font=dict(size=14),
+)
 
     # left: parcoords just one trace
     fig.add_trace(fig_par.data[0], row=1, col=1)
