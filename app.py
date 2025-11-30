@@ -1,11 +1,13 @@
 import dash
 from dash import dcc, html, Input, Output
 import plotly.graph_objs as go
+import base64
+import os
 
+# AOI labels and coordinates (MAKE THESE MATCH YOUR IMAGE SIZE AND PLACEMENT)
 AOI_LIST = [
     "AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"
 ]
-
 AOI_COORDS = {
     "AI":      {"x0": 195, "y0": 180, "x1": 225, "y1": 210, "label":"AI"},
     "Alt_VSI": {"x0": 253, "y0": 180, "x1": 285, "y1": 210, "label":"Alt_VSI"},
@@ -15,29 +17,44 @@ AOI_COORDS = {
     "RPM":     {"x0": 349, "y0": 210, "x1": 395, "y1": 260, "label":"RPM"},
     "Window":  {"x0": 28, "y0": 28, "x1": 370, "y1": 120, "label":"Window"}
 }
-COCKPIT_IMAGE_PATH = "images/cockpit.png"  # update as needed
+COCKPIT_IMAGE_PATH = "images/cockpit.png"  # Make sure this location matches!
 
 from aoibargraph import build_bar_figure
 from aoi_graph import build_main_figure
 
 app = dash.Dash(__name__)
 
+def get_base64_image(image_path):
+    if not os.path.exists(image_path):
+        print(f"Image not found: {image_path}")
+        return None
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
 def cockpit_figure(selected_aoi):
-    # Put the cockpit image behind AOI overlays
-    width, height = 400, 320  # actual image size (update as needed!)
+    # Set these as your cockpit image's actual pixel size!
+    width, height = 400, 320
+
+    encoded_image = get_base64_image(COCKPIT_IMAGE_PATH)
     fig = go.Figure()
 
-    # Add your cockpit image (Update path if needed!)
-    fig.add_layout_image(
-        dict(
-            source="images/cockpit.png",  # Path relative to run location
-            xref="x", yref="y",
-            x=0, y=0,
-            sizex=width, sizey=height,
-            layer="below"
+    if encoded_image:
+        fig.add_layout_image(
+            dict(
+                source=f"data:image/png;base64,{encoded_image}",
+                xref="x", yref="y",
+                x=0, y=0,
+                sizex=width, sizey=height,
+                layer="below"
+            )
         )
-    )
-    # Overlay AOI rectangles and labels
+    else:
+        fig.add_annotation(
+            x=width/2, y=height/2, text="Image file not found!",
+            showarrow=False, font=dict(size=22, color="red")
+        )
+
+    # Draw AOI overlays
     for aoi, coords in AOI_COORDS.items():
         boxcolor = "green" if aoi == selected_aoi else "red"
         opacity = 0.4 if aoi == selected_aoi else 0.18
@@ -59,6 +76,7 @@ def cockpit_figure(selected_aoi):
             bgcolor=boxcolor,
             opacity=opacity
         )
+
     fig.update_xaxes(visible=False, range=[0, width])
     fig.update_yaxes(visible=False, range=[0, height])
     fig.update_layout(
@@ -70,7 +88,7 @@ def cockpit_figure(selected_aoi):
     )
     return fig
 
-# DASH LAYOUT
+# DASH LAYOUT: Two columns, left image & controls, right charts
 app.layout = html.Div([
     html.Div([
         html.H3("AOI Dashboard", style={"margin-bottom": "5px"}),
@@ -82,13 +100,13 @@ app.layout = html.Div([
             clearable=False,
             style={"width": "80%", "margin-bottom": "15px"}
         ),
-        dcc.Graph(id="cockpit-image", figure=cockpit_figure(AOI_LIST[0])),
-    ], style={'width': '44%', 'display': 'inline-block', 'verticalAlign': 'top', 'padding':'15px 8px', "background":"#f6f6fa"}),
+        dcc.Graph(id="cockpit-image", figure=cockpit_figure(AOI_LIST[0]), config={'displayModeBar': False}),
+    ], style={'flex': '1', 'min-width': "410px", 'padding': '20px', "background":"#f6f6fa"}),
     html.Div([
         dcc.Graph(id="bar-chart", config={"displayModeBar": False}),
         dcc.Graph(id="main-chart", config={"displayModeBar": False}),
-    ], style={'width':'54%', 'display':'inline-block', 'verticalAlign':'top', "padding":"15px 12px"}),
-], style={"font-family":"Helvetica, Arial, sans-serif"})
+    ], style={'flex': '2', 'padding': '20px'}),
+], style={"display": "flex", "flexDirection": "row", "height":"100vh"})
 
 @app.callback(
     Output('cockpit-image', 'figure'),
@@ -97,16 +115,16 @@ app.layout = html.Div([
     Input('aoi-dropdown', 'value')
 )
 def update_all(selected_aoi):
-    # update image, bar, parallel charts
     return cockpit_figure(selected_aoi), build_bar_figure(selected_aoi), build_main_figure(selected_aoi)
 
+# Automatically open the browser when running the app
 import webbrowser
 import threading
 import time
 
 if __name__ == "__main__":
     def open_browser():
-        time.sleep(1)  # Wait for the server to start
+        time.sleep(1)
         webbrowser.open("http://127.0.0.1:8050/")
     threading.Thread(target=open_browser).start()
     app.run(debug=True)
