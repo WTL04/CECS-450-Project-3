@@ -156,5 +156,11 @@ def main():
     fig.show()
 
 
+def run_aoi_graph():
+    """Build and show the AOI graph using the summary CSV."""
+    aoi_csv = "datasets/AOI_summary.csv"
+    fig = build_aoi_graph(aoi_csv)
+    fig.show()
+
 if __name__ == "__main__":
-    main()
+    run_aoi_graph()
