@@ -1,120 +1,96 @@
-import argparse
-import sys
-from pathlib import Path
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 
-AOI_PREFIXES = {
-    "NoAOI": "A - No AOI",
-    "Alt_VSI": "B - Alt_VSI",
-    "AI": "C - AI",
-    "TI_HSI": "D - TI_HSI",
-    "SSI": "E - SSI",
-    "ASI": "F - ASI",
-    "RPM": "G - RPM",
-    "Window": "H - Window",
-}
+# List of AOIs for the dashboard/app dropdowns and checks
+AOI_LIST = [
+    "AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window", "NoAOI"
+]
 
-
-def normalize_success(value) -> str:
+def normalize_success(value) -> int:
+    """
+    Convert pilot_success to integer: Successful (1, blue), Unsuccessful (0, red)
+    Supports values like "successful", "unsuccessful", 1/0, yes/no, true/false.
+    """
     s = str(value).strip().lower()
     if s in {"1", "successful", "success", "true", "yes"}:
-        return "Successful"
-    return "Unsuccessful"
-
-
-def build_viz_dataframe(df: pd.DataFrame, success_filter: str) -> pd.DataFrame:
-    success_filter = success_filter.lower()
-    records = []
-    for prefix, label in AOI_PREFIXES.items():
-        col = f"{prefix}_Proportion_of_fixations_spent_in_AOI"
-        if col not in df.columns:
-            continue
-        for _, row in df.iterrows():
-            status = normalize_success(row.get("pilot_success"))
-            if success_filter in {"successful", "success"} and status != "Successful":
-                continue
-            if success_filter in {"unsuccessful", "fail", "failed"} and status != "Unsuccessful":
-                continue
-            records.append({
-                "AOI": label,
-                "pilot_success": status,
-                "proportion_fixations": row[col]
-            })
-    viz_df = pd.DataFrame(records)
-    if viz_df.empty:
-        return viz_df
-    viz_df["proportion_fixations"] = (
-        viz_df["proportion_fixations"].astype(str).str.strip().str.replace("%", "", regex=False)
-    )
-    viz_df["proportion_fixations"] = pd.to_numeric(viz_df["proportion_fixations"], errors="coerce")
-    return viz_df.dropna(subset=["proportion_fixations"])
-
-
-def plot_aoi_attention(csv_path: str, success_filter: str = "all", output: str | None = None, show: bool = True):
-    csv_file = Path(csv_path)
-    if not csv_file.exists():
-        print(f"CSV not found: {csv_path}")
         return 1
-
-    df = pd.read_csv(csv_file)
-    data = build_viz_dataframe(df, success_filter)
-    if data.empty:
-        print("No data matched filter or no numeric proportion values found.")
-        return 2
-
-    summary_df = (data
-                  .groupby(["AOI", "pilot_success"], as_index=False)["proportion_fixations"]
-                  .mean())
-
-    title_filter_part = "All" if success_filter == "all" else success_filter.capitalize()
-    fig = px.bar(
-        summary_df,
-        x="AOI",
-        y="proportion_fixations",
-        color="pilot_success",
-        barmode="group",
-        title=f"AOI Attention Distribution (Proportion of Fixations) - {title_filter_part}",
-        labels={"proportion_fixations": "Mean Proportion of Fixations"}
-    )
-
-    
-    if output:
-        out_path = Path(output)
-        try:
-            fig.write_html(out_path)
-            print(f"Saved interactive HTML plot to: {out_path}\nOpen in a browser to view.")
-        except Exception as e:
-            print(f"Failed to save HTML output: {e}")
-
-    if show:
-        fig.show()
-
     return 0
 
+def build_main_figure(aoi: str, csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figure:
+    """
+    Creates a parallel coordinates Plotly figure for the selected AOI.
+    Color-codes lines: blue for Successful, red for Unsuccessful pilots.
+    Dimensions shown:
+        - Total Number of Fixations
+        - Mean fixation duration s
+        - Proportion of fixations spent in AOI
+        - Proportion of fixations durations spent in AOI
+    """
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as e:
+        fig = go.Figure()
+        fig.update_layout(title=f"Error loading CSV: {e}")
+        return fig
 
-def parse_args(argv):
-    parser = argparse.ArgumentParser(description="Plot AOI attention distribution from eye tracking CSV.")
-    parser.add_argument("--csv", default="./datasets/AOI_DGMs.csv", help="Path to AOI CSV file (default: AOI_DGMs.csv)")
-    parser.add_argument("--filter", default="all", help="Success filter: all | successful | unsuccessful")
-    parser.add_argument("--output", help="Optional path to save HTML plot instead of only showing it")
-    parser.add_argument("--no-show", action="store_true", help="Do not open interactive window; only save if --output provided")
-    return parser.parse_args(argv)
+    # Define expected AOI-specific columns 
+    columns = [
+        f"{aoi} Total Number of Fixations",
+        f"{aoi} Mean fixation duration s",
+        f"{aoi} Proportion of fixations spent in AOI",
+        f"{aoi} Proportion of fixations durations spent in AOI"
+    ]
 
+    # Only include columns that exist in the data
+    plot_cols = [c for c in columns if c in df.columns]
+    if len(plot_cols) < 2:
+        fig = go.Figure()
+        fig.update_layout(title=f"Not enough data for AOI: {aoi}")
+        return fig
 
-def main(argv=None):
-    args = parse_args(argv or sys.argv[1:])
-    code = plot_aoi_attention(
-        csv_path=args.csv,
-        success_filter=args.filter,
-        output=args.output,
-        show=not args.no_show,
+    # labels and values
+    dims = []
+    for c in plot_cols:
+        vec = pd.to_numeric(df[c], errors="coerce")
+        dims.append(dict(
+            label=c,
+            values=vec
+        ))
+
+    # fill missing as Unsuccessful
+    if "pilot_success" in df.columns:
+        color_vec = df["pilot_success"].map(normalize_success).fillna(0).values
+    else:
+        color_vec = [0] * len(df)  # default to Unsuccessful if missing
+
+    fig = go.Figure()
+    fig.add_trace(go.Parcoords(
+        line=dict(
+            color=color_vec,
+            colorscale=[
+                [0, 'firebrick'],   # Unsuccessful (red)
+                [1, 'royalblue']    # Successful (blue)
+            ],
+            colorbar=dict(
+                title="Pilot Success",
+                tickvals=[0, 1],
+                ticktext=["Unsuccessful", "Successful"]
+            )
+        ),
+        dimensions=dims
+    ))
+
+    fig.update_layout(
+        title=f"Parallel Coordinates – AOI: {aoi}",
+        margin=dict(t=60)
     )
-    sys.exit(code)
+    return fig
 
 
 if __name__ == "__main__":
-    main()
+    # Show plot for the default AOI (e.g., "SSI")
+    fig = build_main_figure("SSI")
+    fig.show()
 
 
 
