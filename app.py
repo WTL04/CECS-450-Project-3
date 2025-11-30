@@ -4,7 +4,7 @@ import plotly.graph_objs as go
 import base64
 import os
 
-# AOI labels and coordinates (MAKE THESE MATCH YOUR IMAGE SIZE AND PLACEMENT)
+# AOI labels and coordinates 
 AOI_LIST = [
     "AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"
 ]
@@ -17,7 +17,7 @@ AOI_COORDS = {
     "RPM":     {"x0": 349, "y0": 210, "x1": 395, "y1": 260, "label":"RPM"},
     "Window":  {"x0": 28, "y0": 28, "x1": 370, "y1": 120, "label":"Window"}
 }
-COCKPIT_IMAGE_PATH = "images/cockpit.png"  # Make sure this location matches!
+COCKPIT_IMAGE_PATH = "images/cockpit.png"  
 
 from aoibargraph import build_bar_figure
 from aoi_graph import build_main_figure
@@ -117,7 +117,7 @@ app.layout = html.Div([
 def update_all(selected_aoi):
     return cockpit_figure(selected_aoi), build_bar_figure(selected_aoi), build_main_figure(selected_aoi)
 
-# Automatically open the browser when running the app
+
 import webbrowser
 import threading
 import time
