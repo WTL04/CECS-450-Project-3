@@ -2,7 +2,7 @@ import dash
 from dash import dcc, html, Input, Output
 import os
 from aoibargraph import build_bar_figure
-
+from aoi_graph import build_main_figure
 
 def build_bar_figure(aoi):
     import plotly.graph_objects as go
