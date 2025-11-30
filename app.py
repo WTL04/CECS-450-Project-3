@@ -100,5 +100,13 @@ def update_all(selected_aoi):
     # update image, bar, parallel charts
     return cockpit_figure(selected_aoi), build_bar_figure(selected_aoi), build_main_figure(selected_aoi)
 
+import webbrowser
+import threading
+import time
+
 if __name__ == "__main__":
+    def open_browser():
+        time.sleep(1)  # Wait for the server to start
+        webbrowser.open("http://127.0.0.1:8050/")
+    threading.Thread(target=open_browser).start()
     app.run(debug=True)
