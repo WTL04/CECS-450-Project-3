@@ -2,11 +2,10 @@ import dash
 from dash import dcc, html, Input, Output
 import plotly.graph_objs as go
 
-# AOI labels and coordinates (customize these to match your cockpit image!)
 AOI_LIST = [
     "AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"
 ]
-# EXAMPLE bounding boxes for AOIs (update for your actual cockpit image size/placement!)
+
 AOI_COORDS = {
     "AI":      {"x0": 195, "y0": 180, "x1": 225, "y1": 210, "label":"AI"},
     "Alt_VSI": {"x0": 253, "y0": 180, "x1": 285, "y1": 210, "label":"Alt_VSI"},
