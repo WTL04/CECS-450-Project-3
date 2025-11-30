@@ -1,6 +1,7 @@
 import dash
 from dash import dcc, html, Input, Output
 import os
+from aoibargraph import build_bar_figure
 
 
 def build_bar_figure(aoi):
