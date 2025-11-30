@@ -256,18 +256,22 @@ def build_dashboard(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figure:
 
     fig.update_layout(
         title_text="AOI Gaze Dashboard: Parallel Coordinates (left) + AOI Bar Chart (right)",
+        title_font_size=22,
+        title_y=0.96,  # Move title a little lower
         height=600,
         width=1200,
         showlegend=True,
-        margin=dict(t=80, l=40, r=40, b=40)
+        margin=dict(t=120, l=40, r=40, b=40)  # Increase top margin to add space
     )
 
     fig.add_annotation(
-        text="Select AOI from dropdown above the left plot. Hover over right bars to view tooltip metrics.",
-        x=0.5, y=1.07, xref="paper", yref="paper",
-        showarrow=False, font=dict(size=14),
+        text="Select AOI from dropdown above the left plot.<br />Hover over right bars to view tooltip metrics.",
+        x=0.5, y=1.02, xref="paper", yref="paper",  # Place just below main title
+        showarrow=False,
+        font=dict(size=14),
+        align="center"
     )
-
+    
     return fig
 
 if __name__ == "__main__":
