@@ -276,7 +276,6 @@ def build_dashboard(csv_path: str = "./datasets/AOI_DGMs.csv") -> go.Figure:
 
 if __name__ == "__main__":
     dash_fig = build_dashboard("./datasets/AOI_DGMs.csv")
-    dash_fig.show()
     Path("outputs").mkdir(exist_ok=True)
     dash_fig.write_html("outputs/aoi_dashboard.html")
     print("Saved dashboard to outputs/aoi_dashboard.html")
