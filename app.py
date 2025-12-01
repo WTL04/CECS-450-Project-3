@@ -543,6 +543,153 @@ def build_scan_efficiency_metrics_figure():
     )
     return fig
 
+def build_comprehensive_metrics_heatmap():
+    """
+    Creates an insightful heatmap showing multiple key metrics across all AOIs,
+    comparing successful vs unsuccessful pilots with difference visualization.
+    """
+    if not os.path.exists(DATA_PATH):
+        return go.Figure().update_layout(title="CSV Not Found for Heatmap")
+
+    df = pd.read_csv(DATA_PATH)
+
+    # Define AOIs (exclude NoAOI as it's not a primary instrument)
+    aois = ["AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"]
+
+    # Define key metrics based on project requirements - what distinguishes successful pilots
+    metrics = [
+        ("Proportion_of_fixations_spent_in_AOI", "Attention Distribution"),
+        ("Proportion_of_fixations_durations_spent_in_AOI", "Attention Duration"),
+        ("Mean_fixation_duration_s", "Mean Fixation Time (s)"),
+        ("Total_Number_of_Fixations", "Fixation Count"),
+        ("fixation_to_saccade_ratio", "Fixation/Saccade Ratio"),
+        ("mean_saccade_duration", "Saccade Duration (s)"),
+    ]
+
+    # Split into successful and unsuccessful groups
+    successful = df[df["pilot_success"] == "Successful"]
+    unsuccessful = df[df["pilot_success"] == "Unsuccessful"]
+
+    # Build heatmap data
+    heatmap_data = []
+    y_labels = []
+
+    for metric_suffix, metric_label in metrics:
+        # Calculate means for each group
+        for success_group, group_label in [(successful, "Successful"), (unsuccessful, "Unsuccessful")]:
+            row_data = []
+            for aoi in aois:
+                col_name = f"{aoi}_{metric_suffix}"
+                if col_name in df.columns:
+                    mean_val = pd.to_numeric(success_group[col_name], errors="coerce").mean()
+                    row_data.append(mean_val)
+                else:
+                    row_data.append(np.nan)
+
+            heatmap_data.append(row_data)
+            y_labels.append(f"{metric_label} - {group_label}")
+
+        # Calculate difference (Successful - Unsuccessful)
+        diff_row = []
+        succ_row = heatmap_data[-2]
+        unsucc_row = heatmap_data[-1]
+
+        for s_val, u_val in zip(succ_row, unsucc_row):
+            if not np.isnan(s_val) and not np.isnan(u_val):
+                diff_row.append(s_val - u_val)
+            else:
+                diff_row.append(np.nan)
+
+        heatmap_data.append(diff_row)
+        y_labels.append(f"{metric_label} - Δ (S - U)")
+
+    # Convert to numpy array for easier manipulation
+    heatmap_array = np.array(heatmap_data)
+
+    # Normalize each metric group (3 rows: Successful, Unsuccessful, Delta) separately
+    normalized_data = []
+    for i in range(0, len(heatmap_data), 3):
+        metric_rows = heatmap_array[i:i+3]
+
+        # Normalize Successful and Unsuccessful together for comparability
+        combined = np.concatenate([metric_rows[0], metric_rows[1]])
+        valid_vals = combined[~np.isnan(combined)]
+
+        if len(valid_vals) > 0:
+            vmin, vmax = np.nanmin(combined), np.nanmax(combined)
+            vrange = vmax - vmin if vmax != vmin else 1
+
+            # Normalize successful and unsuccessful rows
+            normalized_data.append(metric_rows[0])
+            normalized_data.append(metric_rows[1])
+
+            # Difference row - center around 0 for diverging colorscale
+            normalized_data.append(metric_rows[2])
+        else:
+            normalized_data.extend([metric_rows[0], metric_rows[1], metric_rows[2]])
+
+    # Create x-axis labels (AOI names)
+    x_labels = [pretty_aoi(aoi) for aoi in aois]
+
+    # Build hover text with actual values
+    hover_text = []
+    for i, row in enumerate(heatmap_data):
+        hover_row = []
+        for j, val in enumerate(row):
+            if np.isnan(val):
+                hover_row.append("N/A")
+            else:
+                hover_row.append(f"{val:.4f}")
+        hover_text.append(hover_row)
+
+    # Create figure with custom colorscale
+    # Use a three-color diverging scale for difference rows, sequential for others
+    fig = go.Figure(data=go.Heatmap(
+        z=heatmap_data,
+        x=x_labels,
+        y=y_labels,
+        colorscale='RdYlGn',  # Red-Yellow-Green diverging colorscale
+        text=hover_text,
+        texttemplate="%{text}",
+        textfont={"size": 9},
+        hovertemplate="<b>%{x}</b><br>%{y}<br>Value: %{text}<extra></extra>",
+        colorbar=dict(
+            title=dict(text="Metric Value", side="right"),
+            len=0.7
+        ),
+        zmin=-np.nanmax(np.abs(heatmap_array)),  # Center diverging scale
+        zmax=np.nanmax(np.abs(heatmap_array)),
+    ))
+
+    # Add horizontal lines to separate metric groups
+    shapes = []
+    for i in range(3, len(y_labels), 3):
+        shapes.append(dict(
+            type='line',
+            x0=-0.5, x1=len(x_labels)-0.5,
+            y0=i-0.5, y1=i-0.5,
+            line=dict(color='black', width=2)
+        ))
+
+    fig.update_layout(
+        title='Comprehensive AOI Performance Metrics: Successful vs Unsuccessful Pilots<br>' +
+              '<sub>Rows show: metric for successful pilots, unsuccessful pilots, and difference (Δ = S - U)<br>' +
+              'Green Δ = successful pilots higher | Red Δ = unsuccessful pilots higher</sub>',
+        xaxis_title="Area of Interest",
+        yaxis_title="",
+        height=900,
+        width=1200,
+        margin=dict(l=250, r=150, t=120, b=80),
+        font=dict(size=10),
+        template='plotly_white',
+        shapes=shapes
+    )
+
+    # Reverse y-axis to show metrics from top to bottom
+    fig.update_yaxes(autorange="reversed")
+
+    return fig
+
 app = dash.Dash(__name__)
 
 app.layout = html.Div([
@@ -579,8 +726,9 @@ app.layout = html.Div([
         html.H2("Overall Performance Metrics", style={"text-align": "center", "margin": "30px 0 20px 0", "color": "#333"}),
         dcc.Tabs(
             id="cumulative-tabs",
-            value="tab-saccade-metrics",
+            value="tab-comprehensive-heatmap",
             children=[
+                dcc.Tab(label="Comprehensive Metrics Heatmap", value="tab-comprehensive-heatmap"),
                 dcc.Tab(label="Saccade Metrics Comparison", value="tab-saccade-metrics"),
                 dcc.Tab(label="Saccade Count by AOI", value="tab-saccade-count"),
                 dcc.Tab(label="Scan Transition Differences", value="tab-scan-transitions"),
@@ -589,7 +737,7 @@ app.layout = html.Div([
             ],
             style={"margin-bottom": "20px"}
         ),
-        dcc.Graph(id="cumulative-graph", config={"displayModeBar": False}, style={"height": "700px"})
+        dcc.Graph(id="cumulative-graph", config={"displayModeBar": True}, style={"height": "900px"})
     ], style={"padding": "20px 50px 50px 50px", "background": "#fafafa", "min-height":"50vh"}),
 ], style={"fontFamily":"Arial"})
 
@@ -618,7 +766,9 @@ def update_aoi_dashboard(selected_aoi, selected_tab):
     Input('cumulative-tabs', 'value'),
 )
 def update_cumulative_metrics(selected_tab):
-    if selected_tab == "tab-saccade-metrics":
+    if selected_tab == "tab-comprehensive-heatmap":
+        return build_comprehensive_metrics_heatmap()
+    elif selected_tab == "tab-saccade-metrics":
         return build_saccade_metrics_comparison_figure()
     elif selected_tab == "tab-saccade-count":
         return build_saccade_count_by_aoi_figure()
@@ -629,7 +779,7 @@ def update_cumulative_metrics(selected_tab):
     elif selected_tab == "tab-scan-efficiency":
         return build_scan_efficiency_metrics_figure()
     else:
-        return build_saccade_metrics_comparison_figure()
+        return build_comprehensive_metrics_heatmap()
 
 if __name__ == "__main__":
     app.run(debug=True)
