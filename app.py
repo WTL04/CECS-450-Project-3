@@ -4,23 +4,34 @@ import plotly.graph_objs as go
 import base64, os
 import pandas as pd
 
-
+# Updated: Cockpit image dimensions from your screenshot!
 COCKPIT_IMAGE_PATH = "images/cockpit.png"
 IMAGE_WIDTH, IMAGE_HEIGHT = 1199, 675
 
+# AOI display names for user-friendly titles
+AOI_TITLES = {
+    "AI": "Attitude Indicator (AI)",
+    "Alt_VSI": "Altitude/Vert. Speed (Alt-VSI)",
+    "ASI": "Airspeed Indicator (ASI)",
+    "SSI": "Standby Instruments (SSI)",
+    "TI_HSI": "Turn Indicator/HSI (TI-HSI)",
+    "RPM": "RPM Gauge",
+    "Window": "Window",
+}
 
-AOI_LIST = [
-    "AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"
-]
+def pretty_aoi(aoi):
+    return AOI_TITLES.get(aoi, aoi.replace("_", " ").title())
 
+# AOI bounding boxes (update for precision!)
+AOI_LIST = ["AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"]
 AOI_COORDS = {
-    "AI":      {"x0": 540, "y0": 340, "x1": 620, "y1": 420, "label":"AI"},
-    "Alt_VSI": {"x0": 640, "y0": 340, "x1": 720, "y1": 420, "label":"Alt_VSI"},
-    "ASI":     {"x0": 540, "y0": 440, "x1": 620, "y1": 520, "label":"ASI"},
-    "SSI":     {"x0": 640, "y0": 440, "x1": 720, "y1": 520, "label":"SSI"},
-    "TI_HSI":  {"x0": 590, "y0": 520, "x1": 670, "y1": 600, "label":"TI_HSI"},
-    "RPM":     {"x0": 950, "y0": 350, "x1": 1080, "y1": 470, "label":"RPM"},
-    "Window":  {"x0": 50, "y0": 50, "x1": 1150, "y1": 200, "label":"Window"}
+    "AI":      {"x0": 540, "y0": 340, "x1": 620, "y1": 420, "label":AOI_TITLES["AI"]},
+    "Alt_VSI": {"x0": 640, "y0": 340, "x1": 720, "y1": 420, "label":AOI_TITLES["Alt_VSI"]},
+    "ASI":     {"x0": 540, "y0": 440, "x1": 620, "y1": 520, "label":AOI_TITLES["ASI"]},
+    "SSI":     {"x0": 640, "y0": 440, "x1": 720, "y1": 520, "label":AOI_TITLES["SSI"]},
+    "TI_HSI":  {"x0": 590, "y0": 520, "x1": 670, "y1": 600, "label":AOI_TITLES["TI_HSI"]},
+    "RPM":     {"x0": 950, "y0": 350, "x1": 1080, "y1": 470, "label":AOI_TITLES["RPM"]},
+    "Window":  {"x0": 50, "y0": 50, "x1": 1150, "y1": 200, "label":AOI_TITLES["Window"]},
 }
 DATA_PATH = "./datasets/AOI_DGMs.csv"
 
@@ -60,12 +71,12 @@ def cockpit_figure(selected_aoi):
         )
         fig.add_annotation(
             x=(coords["x0"] + coords["x1"]) / 2,
-            y=coords["y0"] - 11,
+            y=coords["y0"] - 17,
             text=coords["label"],
             showarrow=False,
             font=dict(size=18, color='white' if aoi == selected_aoi else 'black'),
             bgcolor=boxcolor,
-            opacity=opacity
+            opacity=0.70,
         )
     fig.update_xaxes(visible=False, range=[0, IMAGE_WIDTH])
     fig.update_yaxes(visible=False, range=[0, IMAGE_HEIGHT])
@@ -74,8 +85,7 @@ def cockpit_figure(selected_aoi):
         width=IMAGE_WIDTH,
         height=IMAGE_HEIGHT+70,
         margin=dict(l=0, r=0, t=40, b=0),
-        title="Cockpit AOI Map",
-        paper_bgcolor="#f6f6fa"
+        title="Cockpit AOI Map"
     )
     return fig
 
@@ -94,8 +104,8 @@ def build_bar_figure(selected_aoi):
             marker_color=["royalblue", "firebrick"])
     ])
     fig.update_layout(
-        title=f"{selected_aoi}: Mean Proportion of Fixations",
-        xaxis_title="Pilot Success",
+        title=f"{pretty_aoi(selected_aoi)}: Mean Proportion of Fixations",
+        xaxis_title="Pilot Success Group",
         yaxis_title="Mean Proportion"
     )
     return fig
@@ -112,10 +122,10 @@ def build_main_figure(selected_aoi):
     ]
     plot_cols = [c for c in cols if c in df.columns]
     if len(plot_cols) < 2 or "pilot_success" not in df.columns:
-        return go.Figure().update_layout(title=f"Not enough data for AOI: {selected_aoi}")
+        return go.Figure().update_layout(title=f"Not enough data for AOI: {pretty_aoi(selected_aoi)}")
     dims = []
     for c in plot_cols:
-        dims.append(dict(label=c, values=pd.to_numeric(df[c], errors="coerce")))
+        dims.append(dict(label=c.replace("_", " "), values=pd.to_numeric(df[c], errors="coerce")))
     color_map = df["pilot_success"].map(lambda s: 1 if str(s).strip().lower() == "successful" else 0)
     fig = go.Figure(data=[go.Parcoords(
         line=dict(
@@ -129,7 +139,7 @@ def build_main_figure(selected_aoi):
         ),
         dimensions=dims
     )])
-    fig.update_layout(title=f"Parallel Coordinates – AOI: {selected_aoi}", margin=dict(t=60))
+    fig.update_layout(title=f"Parallel Coordinates – {pretty_aoi(selected_aoi)}", margin=dict(t=60))
     return fig
 
 app = dash.Dash(__name__)
@@ -140,7 +150,7 @@ app.layout = html.Div([
         html.Label("Select AOI:", style={"font-weight": "bold"}),
         dcc.Dropdown(
             id="aoi-dropdown",
-            options=[{"label": AOI_COORDS[aoi]["label"], "value": aoi} for aoi in AOI_LIST],
+            options=[{"label": AOI_TITLES[aoi], "value": aoi} for aoi in AOI_LIST],
             value=AOI_LIST[0],
             clearable=False,
             style={"width": "85%", "margin-bottom": "15px"}
@@ -173,3 +183,4 @@ if __name__ == "__main__":
         webbrowser.open("http://127.0.0.1:8050/")
     threading.Thread(target=open_browser).start()
     app.run(debug=True)
+
