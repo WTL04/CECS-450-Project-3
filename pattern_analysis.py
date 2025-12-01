@@ -1,255 +1,132 @@
-from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from pathlib import Path
 
-
-
-DATA_DIR = Path("datasets")
-OUTPUT_DIR = Path("outputs")
-
-COLLAPSED_XLSX = DATA_DIR / "Collapsed Patterns (Group).xlsx"
-EXPANDED_XLSX = DATA_DIR / "Expanded Patterns (Group).xlsx"
-
-TOP_N = 10
-
-
-def _find_sheet_name(xls: pd.ExcelFile, target: str) -> str | None:
-    """
-    Map expected target names to the actual sheet names.
-    Handles the misspellings "Succesful" and "Unsuccesful".
-    """
-
-    mapping = {
-        "successful": "Succesful",
-        "unsuccessful": "Unsuccesful",
-        "successfulexcludingnoaoia": "Succesful Excluding No AOI(A)",
-        "unsuccessfulexcludingnoaoia": "Unsuccesful Excluding No AOI(A)",
-    }
-
-    key = (
-        target.lower()
-        .replace(" ", "")
-        .replace("_", "")
-        .replace("(a)", "a")
-    )
-
-    if key in mapping:
-        return mapping[key]
-
-    for s in xls.sheet_names:
-        s_clean = (
-            s.lower()
-            .replace(" ", "")
-            .replace("_", "")
-            .replace("(a)", "a")
-        )
-        if s_clean == key:
-            return s
-
-    return None
-
-
-
-def load_pattern_sheet(xlsx_path: Path, group: str, exclude_no_aoi: bool) -> pd.DataFrame:
-    """
-    Load the correct sheet based on group + No AOI condition.
-    """
-
-    if not xlsx_path.exists():
-        raise FileNotFoundError(f"Missing file: {xlsx_path}")
-
-    xls = pd.ExcelFile(xlsx_path)
-
-    if exclude_no_aoi:
-        base = f"{group} Excluding No AOI(A)"
-    else:
-        base = group
-
-    sheet_name = _find_sheet_name(xls, base)
-
-    if sheet_name is None:
-        raise ValueError(
-            f"Could not find sheet for: {base}\n"
-            f"Available sheets: {xls.sheet_names}"
-        )
-
-    df = pd.read_excel(xls, sheet_name=sheet_name)
-
-    df.columns = [c.strip() for c in df.columns]
-
+def load_sheet(path, sheet_name):
+    df = pd.read_excel(path, sheet_name=sheet_name)
+    df.columns = df.columns.str.strip().str.lower()
+    df = df.rename(columns={"pattern string": "Pattern"})
+    df["Metric"] = df["proportional pattern frequency"].astype(float)
+    df = df[~df["Pattern"].str.fullmatch(r"A+")]
     return df
 
+def plot_top(df_s, df_u, title):
+    df_s2 = df_s.copy()
+    df_s2["Group"] = "Successful"
 
+    df_u2 = df_u.copy()
+    df_u2["Group"] = "Unsuccessful"
 
-def select_metric_column(df: pd.DataFrame) -> str:
-    """
-    Choose the best metric column for pattern ranking.
-    """
-    candidates = [
-        "Proportional Pattern Frequency",
-        "Proportional pattern frequency",
-        "Sequence Support",
-        "Sequence support",
-        "Frequency",
-        "Pattern Frequency",
-    ]
+    both = pd.concat([df_s2, df_u2])
+    both = both.sort_values("Metric", ascending=False).head(10)
 
-    normalized = {c.lower(): c for c in df.columns}
-
-    for cand in candidates:
-        if cand.lower() in normalized:
-            return normalized[cand.lower()]
-
-    numeric_cols = df.select_dtypes("number").columns.tolist()
-    if not numeric_cols:
-        raise ValueError("No numeric metric columns found.")
-    return numeric_cols[0]
-
-
-def find_pattern_column(df: pd.DataFrame) -> str:
-    """
-    Identify the pattern string column.
-    """
-    candidates = [
-        "Pattern String",
-        "pattern string",
-        "Pattern",
-        "pattern",
-        "AOI Pattern",
-        "aoi pattern",
-    ]
-
-    normalized = {c.lower(): c for c in df.columns}
-
-    for cand in candidates:
-        if cand.lower() in normalized:
-            return normalized[cand.lower()]
-
-    obj_cols = df.select_dtypes(include=["object"]).columns.tolist()
-    if not obj_cols:
-        raise ValueError("No pattern string column found.")
-    return obj_cols[0]
-
-
-def prepare_top_patterns(df: pd.DataFrame, group: str, metric: str, pattern_col: str) -> pd.DataFrame:
-    tmp = df[[pattern_col, metric]].dropna()
-    tmp = tmp.sort_values(metric, ascending=False).head(TOP_N)
-    tmp["Group"] = group
-    tmp.rename(columns={pattern_col: "Pattern", metric: "Metric"}, inplace=True)
-    return tmp
-
-
-def compute_difference_table(df_succ: pd.DataFrame, df_unsucc: pd.DataFrame,
-                             metric_col: str, pattern_col: str) -> pd.DataFrame:
-
-    s = df_succ[[pattern_col, metric_col]].copy()
-    s.rename(columns={metric_col: "Metric_Success"}, inplace=True)
-
-    u = df_unsucc[[pattern_col, metric_col]].copy()
-    u.rename(columns={metric_col: "Metric_Unsuccess"}, inplace=True)
-
-    merged = pd.merge(s, u, on=pattern_col, how="outer").fillna(0.0)
-    merged.rename(columns={pattern_col: "Pattern"}, inplace=True)
-
-    merged["Diff"] = merged["Metric_Success"] - merged["Metric_Unsuccess"]
-    merged["AbsDiff"] = merged["Diff"].abs()
-
-    merged = merged.sort_values("AbsDiff", ascending=False)
-
-    return merged
-
-def plot_top_patterns(df: pd.DataFrame, title: str, output_file: Path):
     fig = px.bar(
-        df,
+        both,
         x="Pattern",
         y="Metric",
         color="Group",
         barmode="group",
-        text="Metric",
         title=title,
+        hover_data={"Metric": ":.6f"}
     )
 
-    fig.update_traces(texttemplate="%{text:.3f}", textposition="outside")
-    fig.update_layout(xaxis_tickangle=-45, uniformtext_minsize=8)
+    fig.update_layout(
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#f7fafc",
+        xaxis_title="Pattern",
+        yaxis_title="Proportional Pattern Frequency",
+        hovermode="closest",
+        title_x=0.5
+    )
 
-    fig.write_html(str(output_file))
-    print("[OK] Saved:", output_file)
+    return fig.to_html(full_html=False, include_plotlyjs=False)
 
+def plot_diff(df_s, df_u, title):
 
-def plot_difference_patterns(df: pd.DataFrame, title: str, output_file: Path):
-    top = df.head(TOP_N).sort_values("Diff", ascending=False)
+    s = df_s[["Pattern", "Metric"]].rename(columns={"Metric": "Success"})
+    u = df_u[["Pattern", "Metric"]].rename(columns={"Metric": "Unsuccessful"})
 
-    colors = ["#2ecc71" if d > 0 else "#e74c3c" for d in top["Diff"]]
+    merged = pd.merge(s, u, on="Pattern", how="outer").fillna(0.0)
+    merged["Diff"] = merged["Success"] - merged["Unsuccessful"]
+
+    pos = merged[merged["Diff"] > 0].sort_values("Diff", ascending=False).head(5)
+    neg = merged[merged["Diff"] < 0].sort_values("Diff", ascending=True).head(5)
+
+    final = pd.concat([pos, neg])
+    final["Color"] = final["Diff"].apply(
+        lambda x: "#2f855a" if x > 0 else "#e53e3e"
+    )
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=top["Pattern"],
-        y=top["Diff"],
-        marker_color=colors,
-        text=top["Diff"].round(3),
-        textposition="outside",
-    ))
 
-    fig.add_hline(y=0, line_dash="dash", line_color="black")
+    fig.add_trace(go.Bar(
+        x=final["Pattern"],
+        y=final["Diff"],
+        marker_color=final["Color"],
+        text=final["Diff"].round(6),
+        textposition="outside",
+        customdata=final[["Success", "Unsuccessful"]],
+        hovertemplate=(
+            "<b>Pattern:</b> %{x}<br>"
+            "<b>Difference:</b> %{y:.6f}<extra></extra>"
+        )
+    ))
 
     fig.update_layout(
         title=title,
-        xaxis_title="Pattern",
-        yaxis_title="Success - Unsuccess",
-        xaxis_tickangle=-45,
-        template="plotly_white",
+        yaxis_title="Difference (Success – Unsuccessful)",
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#f7fafc",
+        hovermode="closest",
+        title_x=0.5
     )
 
-    fig.write_html(str(output_file))
-    print("[OK] Saved:", output_file)
+    fig.add_hline(y=0, line_dash="dash", line_color="black")
 
+    return fig.to_html(full_html=False, include_plotlyjs=False)
 
+def run_mode(path, collapsed, exclude_noaoi, html):
 
-def analyze_patterns(xlsx_path: Path, collapsed: bool, exclude_no_aoi: bool):
-    mode = "Collapsed" if collapsed else "Expanded"
-    noaoi = "Excluding_NoAOI" if exclude_no_aoi else "Including_NoAOI"
+    mode_label = "Collapsed" if collapsed else "Expanded"
+    aoi_label = "Excluding No AOI" if exclude_noaoi else "Including No AOI"
 
-    print(f"\n=== {mode} patterns ({noaoi}) from {xlsx_path.name} ===")
+    sheet_s = "Succesful Excluding No AOI(A)" if exclude_noaoi else "Succesful"
+    sheet_u = "Unsuccesful Excluding No AOI(A)" if exclude_noaoi else "Unsuccesful"
 
-    df_succ = load_pattern_sheet(xlsx_path, "Successful", exclude_no_aoi)
-    df_unsucc = load_pattern_sheet(xlsx_path, "Unsuccessful", exclude_no_aoi)
+    df_s = load_sheet(path, sheet_s)
+    df_u = load_sheet(path, sheet_u)
 
-    metric_col = select_metric_column(df_succ)
-    pattern_col = find_pattern_column(df_succ)
+    html.append(f"<h2>Top Patterns — {mode_label} ({aoi_label})</h2>")
+    html.append(plot_top(df_s, df_u, f"Top 10 Patterns — {mode_label} ({aoi_label})"))
 
-    print("[INFO] Metric column:", metric_col)
-    print("[INFO] Pattern column:", pattern_col)
+    html.append(f"<h2>Pattern Differences — {mode_label} ({aoi_label})</h2>")
+    html.append(plot_diff(df_s, df_u, f"Pattern Differences — {mode_label} ({aoi_label})"))
 
-    top_s = prepare_top_patterns(df_succ, "Successful", metric_col, pattern_col)
-    top_u = prepare_top_patterns(df_unsucc, "Unsuccessful", metric_col, pattern_col)
-
-    top_all = pd.concat([top_s, top_u])
-
-    diff_df = compute_difference_table(df_succ, df_unsucc, metric_col, pattern_col)
-
-    base = f"{mode.lower()}_{noaoi.lower()}"
-
-    top_html = OUTPUT_DIR / f"{base}_top_patterns.html"
-    diff_html = OUTPUT_DIR / f"{base}_pattern_differences.html"
-
-    plot_top_patterns(top_all, f"Top {TOP_N} {mode} Patterns ({noaoi})", top_html)
-    plot_difference_patterns(diff_df, f"Top {TOP_N} Pattern Differences ({mode}, {noaoi})", diff_html)
-
-    (OUTPUT_DIR / f"{base}_top_patterns.csv").write_text(top_all.to_csv(index=False))
-    (OUTPUT_DIR / f"{base}_pattern_differences.csv").write_text(diff_df.to_csv(index=False))
-
-    print("[OK] CSVs saved for", base)
 
 def main():
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    analyze_patterns(COLLAPSED_XLSX, collapsed=True, exclude_no_aoi=False)
-    analyze_patterns(COLLAPSED_XLSX, collapsed=True, exclude_no_aoi=True)
-    analyze_patterns(EXPANDED_XLSX, collapsed=False, exclude_no_aoi=False)
-    analyze_patterns(EXPANDED_XLSX, collapsed=False, exclude_no_aoi=True)
+    outdir = Path("outputs")
+    outdir.mkdir(exist_ok=True)
 
-    print("\nAll pattern analysis done.")
-    print("Outputs in ./outputs/")
+    html = []
+    html.append("<html><head><title>Pattern Analysis Dashboard</title>")
+    html.append('<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>')
+    html.append("</head><body>")
+    html.append("<h1>Pattern Analysis Dashboard</h1>")
+
+    COLLAPSED = Path("datasets/Collapsed Patterns (Group).xlsx")
+    EXPANDED = Path("datasets/Expanded Patterns (Group).xlsx")
+
+    run_mode(COLLAPSED, True, False, html)
+    run_mode(COLLAPSED, True, True, html)
+    run_mode(EXPANDED, False, False, html)
+    run_mode(EXPANDED, False, True, html)
+    html.append("</body></html>")
+
+    output_file = outdir / "pattern_analysis_dashboard.html"
+    output_file.write_text("\n".join(html), encoding="utf-8")
+
+    print(f"Dashboard saved to {output_file}")
 
 
 if __name__ == "__main__":
