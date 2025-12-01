@@ -1,117 +1,183 @@
 import dash
 from dash import dcc, html, Input, Output
-import os
-from aoibargraph import build_bar_figure
+import plotly.graph_objs as go
+import base64, os
+import pandas as pd
 
+COCKPIT_IMAGE_PATH = "images/cockpit.png"
+IMAGE_WIDTH, IMAGE_HEIGHT = 900, 504
 
-def build_bar_figure(aoi):
-    import plotly.graph_objects as go
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=["Successful", "Unsuccessful"], y=[1.0, 0.5]))
-    fig.update_layout(title=f"Bar Chart - {aoi}")
-    return fig
-
-def build_main_figure(aoi):
-    import plotly.graph_objects as go
-    fig = go.Figure()
-    # Dummy lines
-    fig.add_trace(go.Scatter(x=[0,1,2], y=[aoi.count("A"), aoi.count("I"), aoi.count("O")], mode='lines+markers'))
-    fig.update_layout(title=f"Main Chart - {aoi}")
-    return fig
-
-
-AOI_REGIONS = {
-    'AI':        {'x0': 120, 'y0': 100, 'x1': 230, 'y1': 180},
-    'Alt_VSI':   {'x0': 340, 'y0': 100, 'x1': 460, 'y1': 180},
-    'ASI':       {'x0': 560, 'y0': 100, 'x1': 670, 'y1': 180},
-    'SSI':       {'x0': 330, 'y0': 200, 'x1': 470, 'y1': 380},
-    'TI_HSI':    {'x0': 50,  'y0': 0,   'x1': 750, 'y1': 80},
-    'RPM':       {'x0': 140, 'y0': 300, 'x1': 210, 'y1': 370},
-    'Window':    {'x0': 40,  'y0': 40,  'x1': 770, 'y1': 120},
-    'No_AOI':    {'x0': 400, 'y0': 400, 'x1': 450, 'y1': 440}
+AOI_TITLES = {
+    "AI": "Attitude Indicator (AI)",
+    "Alt_VSI": "Altitude/Vert. Speed (Alt-VSI)",
+    "ASI": "Airspeed Indicator (ASI)",
+    "SSI": "Standby Instruments (SSI)",
+    "TI_HSI": "Turn Indicator/HSI (TI-HSI)",
+    "RPM": "RPM Gauge",
+    "Window": "Window"
 }
-AOI_LIST = list(AOI_REGIONS.keys())
-IMG_PATH = "./images/cockpit.png"   # Put your cockpit image here!
+def pretty_aoi(aoi): return AOI_TITLES.get(aoi, aoi.replace("_", " ").title())
+
+AOI_LIST = list(AOI_TITLES.keys())
+AOI_COORDS = {
+    "AI":      {"x0": 402, "y0": 225, "x1": 482, "y1": 305, "label":AOI_TITLES["AI"]},
+    "Alt_VSI": {"x0": 502, "y0": 225, "x1": 582, "y1": 305, "label":AOI_TITLES["Alt_VSI"]},
+    "ASI":     {"x0": 402, "y0": 325, "x1": 482, "y1": 405, "label":AOI_TITLES["ASI"]},
+    "SSI":     {"x0": 502, "y0": 325, "x1": 582, "y1": 405, "label":AOI_TITLES["SSI"]},
+    "TI_HSI":  {"x0": 452, "y0": 425, "x1": 532, "y1": 504, "label":AOI_TITLES["TI_HSI"]},
+    "RPM":     {"x0": 700, "y0": 225, "x1": 830, "y1": 335, "label":AOI_TITLES["RPM"]},
+    "Window":  {"x0": 20, "y0": 20, "x1": 880, "y1": 170, "label":AOI_TITLES["Window"]},
+}
+DATA_PATH = "./datasets/AOI_DGMs.csv"
+
+def get_base64_image(image_path):
+    if not os.path.exists(image_path):
+        print(f"Image not found: {image_path}")
+        return None
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+def cockpit_figure(selected_aoi):
+    encoded_image = get_base64_image(COCKPIT_IMAGE_PATH)
+    fig = go.Figure()
+    if encoded_image:
+        fig.add_layout_image(dict(
+            source=f"data:image/png;base64,{encoded_image}",
+            xref="x", yref="y",
+            x=0, y=0,
+            sizex=IMAGE_WIDTH, sizey=IMAGE_HEIGHT,
+            layer="below"
+        ))
+    for aoi, coords in AOI_COORDS.items():
+        boxcolor = "#32CD32" if aoi == selected_aoi else "#FF6347"
+        opacity = 0.32 if aoi == selected_aoi else 0.14
+        fig.add_shape(
+            type="rect",
+            x0=coords["x0"], y0=coords["y0"],
+            x1=coords["x1"], y1=coords["y1"],
+            line=dict(color=boxcolor, width=4 if aoi == selected_aoi else 2),
+            fillcolor=boxcolor,
+            opacity=opacity,
+        )
+        fig.add_annotation(
+            x=(coords["x0"] + coords["x1"]) / 2,
+            y=(coords["y0"] + coords["y1"]) / 2,
+            text=coords["label"].split("(")[0].replace("/"," "),
+            showarrow=False,
+            font=dict(size=16, color='white' if aoi == selected_aoi else 'black', family="Arial"),
+            bgcolor=boxcolor,
+            opacity=0.95,
+        )
+    fig.update_xaxes(visible=False, range=[0, IMAGE_WIDTH])
+    fig.update_yaxes(visible=False, range=[0, IMAGE_HEIGHT])
+    fig.update_layout(
+        autosize=False,
+        width=IMAGE_WIDTH,
+        height=IMAGE_HEIGHT+60,
+        margin=dict(l=0, r=0, t=40, b=0),
+        title="Cockpit AOI Map"
+    )
+    return fig
+
+def build_bar_figure(selected_aoi):
+    if not os.path.exists(DATA_PATH):
+        return go.Figure().update_layout(title="CSV Not Found for Bar Chart")
+    df = pd.read_csv(DATA_PATH)
+    col = f"{selected_aoi}_Proportion_of_fixations_spent_in_AOI"
+    if col not in df.columns or "pilot_success" not in df.columns:
+        return go.Figure().update_layout(title=f"Bar chart: Column '{col}' or pilot_success missing!")
+    data = df[[col, "pilot_success"]].dropna()
+    success_mean = data[data["pilot_success"] == "Successful"][col].mean()
+    unsuccess_mean = data[data["pilot_success"] == "Unsuccessful"][col].mean()
+    fig = go.Figure(data=[
+        go.Bar(x=["Successful", "Unsuccessful"], y=[success_mean, unsuccess_mean],
+            marker_color=["#1f77b4", "#d62728"])
+    ])
+    fig.update_layout(
+        title=f"{pretty_aoi(selected_aoi)}: Mean Proportion of Fixations",
+        xaxis_title="Pilot Success Group",
+        yaxis_title="Mean Proportion",
+        margin=dict(t=60)
+    )
+    return fig
+
+def build_main_figure(selected_aoi):
+    if not os.path.exists(DATA_PATH):
+        return go.Figure().update_layout(title="CSV Not Found for Main Chart")
+    df = pd.read_csv(DATA_PATH)
+    cols = [
+        f"{selected_aoi}_Total_Number_of_Fixations",
+        f"{selected_aoi}_Mean_fixation_duration_s",
+        f"{selected_aoi}_Proportion_of_fixations_spent_in_AOI",
+        f"{selected_aoi}_Proportion_of_fixations_durations_spent_in_AOI"
+    ]
+    plot_cols = [c for c in cols if c in df.columns]
+    if len(plot_cols) < 2 or "pilot_success" not in df.columns:
+        return go.Figure().update_layout(title=f"Not enough data for AOI: {pretty_aoi(selected_aoi)}")
+    dims = []
+    for c in plot_cols:
+        dims.append(dict(
+            label=c.replace("_", " ").title(),
+            values=pd.to_numeric(df[c], errors="coerce"),
+        ))
+    color_map = df["pilot_success"].map(lambda s: 1 if str(s).strip().lower() == "successful" else 0)
+    fig = go.Figure(data=[go.Parcoords(
+        line=dict(
+            color=color_map,
+            colorscale=[[0, '#d62728'], [1, '#1f77b4']],
+            showscale=True,
+            colorbar=dict(
+                title="Pilot Success",
+                tickvals=[0, 1],
+                ticktext=["Unsuccessful", "Successful"],
+            )
+        ),
+        dimensions=dims,
+    )])
+    fig.update_layout(
+        title=f"Parallel Coordinates – {pretty_aoi(selected_aoi)}",
+        margin=dict(t=95)
+    )
+    return fig
 
 app = dash.Dash(__name__)
 
-def cockpit_figure(selected_aoi=None):
-    import plotly.graph_objects as go
-    fig = go.Figure()
-    fig.add_layout_image(
-        dict(
-            source=IMG_PATH,
-            xref="x", yref="y",
-            x=0, y=0,
-            sizex=800, sizey=449,
-            layer="below"
-        )
-    )
-    # Add AOI box
-    for aoi, box in AOI_REGIONS.items():
-        line_col = "red" if aoi != selected_aoi else "green"
-        opac = 0.2 if aoi != selected_aoi else 0.4
-        fig.add_shape(
-            type="rect",
-            x0=box['x0'], y0=box['y0'], x1=box['x1'], y1=box['y1'],
-            line_color=line_col,
-            fillcolor=line_col,
-            opacity=opac,
-        )
-        fig.add_annotation(
-            x=(box['x0'] + box['x1']) / 2,
-            y=box['y1'] + 16,
-            text=aoi,
-            showarrow=False,
-            font={'color': 'white', 'size': 11},
-            bgcolor=line_col
-        )
-    fig.update_xaxes(visible=False, range=[0,800])
-    fig.update_yaxes(visible=False, range=[0,449])
-    fig.update_layout(
-        margin=dict(l=0, r=0, t=30, b=0),
-        title="Cockpit AOI Map (Click a box to update charts)",
-        height=480,
-        width=800,
-        dragmode=False,
-        clickmode='event+select'
-    )
-    return fig
-
 app.layout = html.Div([
     html.Div([
-        dcc.Graph(
-            id='cockpit-image',
-            figure=cockpit_figure(selected_aoi=AOI_LIST[0]),
-            config={"staticPlot": False}
+        html.H3("AOI Dashboard", style={"margin-bottom": "5px"}),
+        html.Label("Select AOI:", style={"font-weight": "bold"}),
+        dcc.Dropdown(
+            id="aoi-dropdown",
+            options=[{"label": AOI_TITLES[aoi], "value": aoi} for aoi in AOI_LIST],
+            value=AOI_LIST[0],
+            clearable=False,
+            style={"width": "85%", "margin-bottom": "15px", "fontWeight": "bold"}
         ),
-        html.H4("Click an AOI region above to update charts", style={'textAlign':'center'})
-    ], style={'width':'48%', 'display':'inline-block', 'verticalAlign':'top'}),
+        dcc.Graph(id="cockpit-image"),
+    ], style={'flex': '1', 'min-width': "450px", 'padding': '20px', "background":"#f6f6fa"}),
     html.Div([
-        dcc.Graph(id='bar-chart', figure=build_bar_figure(AOI_LIST[0])),
-        dcc.Graph(id='main-chart', figure=build_main_figure(AOI_LIST[0])),
-    ], style={'width':'48%', 'display':'inline-block', 'verticalAlign':'top'}),
-], style={'display':'flex', 'gap':'12px'})
+        dcc.Graph(id="bar-chart", config={"displayModeBar": False}),
+        dcc.Graph(id="main-chart", config={"displayModeBar": False}),
+    ], style={'flex': '2', 'padding': '20px'}),
+], style={"display": "flex", "flexDirection": "row", "height":"100vh", "fontFamily":"Arial"})
 
 @app.callback(
+    Output('cockpit-image', 'figure'),
     Output('bar-chart', 'figure'),
     Output('main-chart', 'figure'),
-    Output('cockpit-image', 'figure'),
-    Input('cockpit-image', 'clickData'),
+    Input('aoi-dropdown', 'value')
 )
-def update_on_click(clickData):
-    selected_aoi = AOI_LIST[0]
-    if clickData and 'points' in clickData and len(clickData['points']) > 0:
-        xval = clickData['points'][0].get('x')
-        yval = clickData['points'][0].get('y')
-        for aoi, box in AOI_REGIONS.items():
-            if xval is not None and yval is not None \
-                and box['x0'] <= xval <= box['x1'] \
-                and box['y0'] <= yval <= box['y1']:
-                selected_aoi = aoi
-                break
+def update_all(selected_aoi):
+    return (
+        cockpit_figure(selected_aoi),
+        build_bar_figure(selected_aoi),
+        build_main_figure(selected_aoi)
+    )
 
-    return build_bar_figure(selected_aoi), build_main_figure(selected_aoi), cockpit_figure(selected_aoi)
-
+import webbrowser, threading, time
 if __name__ == "__main__":
-    app.run_server(debug=True)
+    def open_browser():
+        time.sleep(1)
+        webbrowser.open("http://127.0.0.1:8050/")
+    threading.Thread(target=open_browser).start()
+    app.run(debug=True)
