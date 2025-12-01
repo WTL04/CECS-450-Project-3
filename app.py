@@ -7,7 +7,6 @@ import pandas as pd
 COCKPIT_IMAGE_PATH = "images/cockpit.png"
 IMAGE_WIDTH, IMAGE_HEIGHT = 900, 504
 
-
 AOI_TITLES = {
     "AI": "Attitude Indicator (AI)",
     "Alt_VSI": "Altitude/Vert. Speed (Alt-VSI)",
@@ -19,7 +18,6 @@ AOI_TITLES = {
 }
 def pretty_aoi(aoi): return AOI_TITLES.get(aoi, aoi.replace("_", " ").title())
 
-# AOI bounding boxes 
 AOI_LIST = list(AOI_TITLES.keys())
 AOI_COORDS = {
     "AI":      {"x0": 402, "y0": 225, "x1": 482, "y1": 305, "label":AOI_TITLES["AI"]},
@@ -118,13 +116,10 @@ def build_main_figure(selected_aoi):
     if len(plot_cols) < 2 or "pilot_success" not in df.columns:
         return go.Figure().update_layout(title=f"Not enough data for AOI: {pretty_aoi(selected_aoi)}")
     dims = []
-    # Make axis labels large and bold!
     for c in plot_cols:
         dims.append(dict(
-            label='<span style="font-size:18px;font-weight:bold">' + c.replace("_", " ") + '</span>',
+            label=c.replace("_", " ").title(),
             values=pd.to_numeric(df[c], errors="coerce"),
-            tickfont=dict(size=15, family="Arial"),
-            range=[df[c].min(), df[c].max()] if pd.api.types.is_numeric_dtype(df[c]) else None
         ))
     color_map = df["pilot_success"].map(lambda s: 1 if str(s).strip().lower() == "successful" else 0)
     fig = go.Figure(data=[go.Parcoords(
@@ -136,21 +131,18 @@ def build_main_figure(selected_aoi):
                 title="Pilot Success",
                 tickvals=[0, 1],
                 ticktext=["Unsuccessful", "Successful"],
-                titlefont=dict(size=16, family="Arial"),
-                tickfont=dict(size=15, family="Arial"),
+                titlefont=dict(size=18, family="Arial"),
+                tickfont=dict(size=16, family="Arial"),
             )
         ),
         dimensions=dims,
-        labelfont=dict(size=17, family="Arial", color="black"),
-        tickfont=dict(size=15, family="Arial", color="black")
+        labelfont=dict(size=20, family="Arial", color="black"),
+        tickfont=dict(size=18, family="Arial", color="black")
     )])
     fig.update_layout(
-        title={
-            "text": f"Parallel Coordinates – {pretty_aoi(selected_aoi)}",
-            "font":{"size":28, "family":"Arial", "color":"#222"}
-        },
-        margin=dict(t=125),
-        font=dict(size=18, family="Arial", color="black")
+        title={'text': f"Parallel Coordinates – {pretty_aoi(selected_aoi)}", 'font': {'size': 32, 'family': "Arial", 'color': "#222"}},
+        margin=dict(t=130),
+        font=dict(size=20, family="Arial", color="black")
     )
     return fig
 
