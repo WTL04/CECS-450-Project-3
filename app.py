@@ -7,7 +7,7 @@ import pandas as pd
 COCKPIT_IMAGE_PATH = "images/cockpit.png"
 IMAGE_WIDTH, IMAGE_HEIGHT = 900, 504
 
-# AOI titles for dropdown and charts
+
 AOI_TITLES = {
     "AI": "Attitude Indicator (AI)",
     "Alt_VSI": "Altitude/Vert. Speed (Alt-VSI)",
@@ -19,7 +19,7 @@ AOI_TITLES = {
 }
 def pretty_aoi(aoi): return AOI_TITLES.get(aoi, aoi.replace("_", " ").title())
 
-# AOI bounding boxes (update coordinates for your image)
+# AOI bounding boxes 
 AOI_LIST = list(AOI_TITLES.keys())
 AOI_COORDS = {
     "AI":      {"x0": 402, "y0": 225, "x1": 482, "y1": 305, "label":AOI_TITLES["AI"]},
