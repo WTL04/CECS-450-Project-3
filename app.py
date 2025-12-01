@@ -4,11 +4,11 @@ import plotly.graph_objs as go
 import base64, os
 import pandas as pd
 
-
+# Set to your new cockpit image size!
 COCKPIT_IMAGE_PATH = "images/cockpit.png"
-IMAGE_WIDTH, IMAGE_HEIGHT = 1199, 675
+IMAGE_WIDTH, IMAGE_HEIGHT = 900, 504
 
-
+# AOI titles for user-friendly display
 AOI_TITLES = {
     "AI": "Attitude Indicator (AI)",
     "Alt_VSI": "Altitude/Vert. Speed (Alt-VSI)",
@@ -18,19 +18,18 @@ AOI_TITLES = {
     "RPM": "RPM Gauge",
     "Window": "Window"
 }
-def pretty_aoi(aoi):
-    return AOI_TITLES.get(aoi, aoi.replace("_", " ").title())
+def pretty_aoi(aoi): return AOI_TITLES.get(aoi, aoi.replace("_", " ").title())
 
-
+# (You should update AOI_COORDS to fit your resized instrument locations!)
 AOI_LIST = list(AOI_TITLES.keys())
 AOI_COORDS = {
-    "AI":      {"x0": 540, "y0": 420, "x1": 620, "y1": 500, "label":AOI_TITLES["AI"]},
-    "Alt_VSI": {"x0": 640, "y0": 420, "x1": 720, "y1": 500, "label":AOI_TITLES["Alt_VSI"]},
-    "ASI":     {"x0": 540, "y0": 520, "x1": 620, "y1": 600, "label":AOI_TITLES["ASI"]},
-    "SSI":     {"x0": 640, "y0": 520, "x1": 720, "y1": 600, "label":AOI_TITLES["SSI"]},
-    "TI_HSI":  {"x0": 590, "y0": 640, "x1": 670, "y1": 720, "label":AOI_TITLES["TI_HSI"]},
-    "RPM":     {"x0": 950, "y0": 420, "x1": 1080, "y1": 540, "label":AOI_TITLES["RPM"]},
-    "Window":  {"x0": 50, "y0": 50, "x1": 1150, "y1": 200, "label":AOI_TITLES["Window"]}
+    "AI":      {"x0": 402, "y0": 225, "x1": 482, "y1": 305, "label":AOI_TITLES["AI"]},
+    "Alt_VSI": {"x0": 502, "y0": 225, "x1": 582, "y1": 305, "label":AOI_TITLES["Alt_VSI"]},
+    "ASI":     {"x0": 402, "y0": 325, "x1": 482, "y1": 405, "label":AOI_TITLES["ASI"]},
+    "SSI":     {"x0": 502, "y0": 325, "x1": 582, "y1": 405, "label":AOI_TITLES["SSI"]},
+    "TI_HSI":  {"x0": 452, "y0": 425, "x1": 532, "y1": 504, "label":AOI_TITLES["TI_HSI"]},
+    "RPM":     {"x0": 700, "y0": 225, "x1": 830, "y1": 335, "label":AOI_TITLES["RPM"]},
+    "Window":  {"x0": 20, "y0": 20, "x1": 880, "y1": 170, "label":AOI_TITLES["Window"]},
 }
 DATA_PATH = "./datasets/AOI_DGMs.csv"
 
@@ -44,18 +43,15 @@ def get_base64_image(image_path):
 def cockpit_figure(selected_aoi):
     encoded_image = get_base64_image(COCKPIT_IMAGE_PATH)
     fig = go.Figure()
-    # Draw image background
     if encoded_image:
-        fig.add_layout_image(
-            dict(
-                source=f"data:image/png;base64,{encoded_image}",
-                xref="x", yref="y",
-                x=0, y=0,
-                sizex=IMAGE_WIDTH, sizey=IMAGE_HEIGHT,
-                layer="below"
-            )
-        )
-    # AOI overlays
+        fig.add_layout_image(dict(
+            source=f"data:image/png;base64,{encoded_image}",
+            xref="x", yref="y",
+            x=0, y=0,
+            sizex=IMAGE_WIDTH, sizey=IMAGE_HEIGHT,
+            layer="below"
+        ))
+    # Draw overlays
     for aoi, coords in AOI_COORDS.items():
         boxcolor = "#32CD32" if aoi == selected_aoi else "#FF6347"
         opacity = 0.32 if aoi == selected_aoi else 0.14
@@ -70,7 +66,7 @@ def cockpit_figure(selected_aoi):
         fig.add_annotation(
             x=(coords["x0"] + coords["x1"]) / 2,
             y=(coords["y0"] + coords["y1"]) / 2,
-            text=coords["label"].split("(")[0].replace("/","<br>"),  # only main label
+            text=coords["label"].split("(")[0].replace("/","<br>"),
             showarrow=False,
             font=dict(size=18, color='white' if aoi == selected_aoi else 'black', family="Arial"),
             bgcolor=boxcolor,
@@ -81,9 +77,9 @@ def cockpit_figure(selected_aoi):
     fig.update_layout(
         autosize=False,
         width=IMAGE_WIDTH,
-        height=IMAGE_HEIGHT+70,
+        height=IMAGE_HEIGHT+60,
         margin=dict(l=0, r=0, t=40, b=0),
-        title="Cockpit AOI Map"
+        title={"text": "Cockpit AOI Map", "font": {"size": 22, "family": "Arial"}}
     )
     return fig
 
@@ -102,10 +98,11 @@ def build_bar_figure(selected_aoi):
             marker_color=["#1f77b4", "#d62728"])
     ])
     fig.update_layout(
-        title=f"{pretty_aoi(selected_aoi)}: Mean Proportion of Fixations",
+        title={"text":f"{pretty_aoi(selected_aoi)}: Mean Proportion of Fixations", "font":{"size":24}},
         xaxis_title="Pilot Success Group",
         yaxis_title="Mean Proportion",
-        font=dict(size=16)
+        font=dict(size=16),
+        margin=dict(t=60)
     )
     return fig
 
@@ -138,7 +135,14 @@ def build_main_figure(selected_aoi):
         ),
         dimensions=dims
     )])
-    fig.update_layout(title=f"Parallel Coordinates – {pretty_aoi(selected_aoi)}", margin=dict(t=55), font=dict(size=15))
+    fig.update_layout(
+        title={
+            "text": f"Parallel Coordinates – {pretty_aoi(selected_aoi)}",
+            "font":{"size":22}
+        },
+        margin=dict(t=110),  # More top margin to prevent title overlap
+        font=dict(size=15)
+    )
     return fig
 
 app = dash.Dash(__name__)
