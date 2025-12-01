@@ -1,15 +1,7 @@
-"""
-Scan Efficiency Analysis
-Analyzes AOI transition patterns and scanning efficiency between successful and unsuccessful pilots
-Author: Russell
-"""
-
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import plotly.express as px
-from pathlib import Path
 
 # Load main DGM data for pilot success categories
 dgm_df = pd.read_csv('datasets/AOI_DGMs.csv')
@@ -17,531 +9,365 @@ dgm_df['Success_Category'] = dgm_df['Approach_Score'].apply(
     lambda x: 'Successful' if x >= 0.7 else 'Unsuccessful'
 )
 
-# Load pattern data from Excel sheets (handling misspelling in sheets)
+# Load pattern data from Excel sheets
 collapsed_xls = pd.ExcelFile('datasets/Collapsed Patterns (Group).xlsx')
-expanded_xls = pd.ExcelFile('datasets/Expanded Patterns (Group).xlsx')
 
-# Map to actual sheet names (with misspellings)
 successful_collapsed = pd.read_excel(collapsed_xls, sheet_name='Succesful Excluding No AOI(A)')
 unsuccessful_collapsed = pd.read_excel(collapsed_xls, sheet_name='Unsuccesful Excluding No AOI(A)')
-successful_expanded = pd.read_excel(expanded_xls, sheet_name='Succesful Excluding No AOI(A)')
-unsuccessful_expanded = pd.read_excel(expanded_xls, sheet_name='Unsuccesful Excluding No AOI(A)')
 
 # AOI mapping
 aoi_map = {
-    'A': 'No_AOI',
     'B': 'Alt_VSI',
     'C': 'AI',
     'D': 'TI_HSI',
     'E': 'SSI',
     'F': 'ASI',
-    'G': 'RPM',
-    'H': 'Window'
+    'G': 'RPM'
 }
 
-# Instrument AOIs only (excluding No_AOI and Window for core analysis)
-instrument_aois = ['B', 'C', 'D', 'E', 'F', 'G']  # Alt_VSI, AI, TI_HSI, SSI, ASI, RPM
-
 print("="*80)
-print("SCAN EFFICIENCY ANALYSIS")
+print("SCAN EFFICIENCY ANALYSIS V2")
 print("="*80)
 
 # ============================================================================
-# ANALYSIS 1: AOI Transition Matrix
+# VIZ 1: CRITICAL TRANSITION DIFFERENCES
+# What do successful pilots do differently?
 # ============================================================================
 
-def build_transition_matrix(pattern_df):
-    """Build transition count matrix from pattern sequences weighted by frequency"""
-    transitions = {}
-
+def get_transition_differences(succ_df, unsucc_df):
+    """Find which transitions differ most between groups"""
     pattern_col = 'Pattern String'
     freq_col = 'Proportional Pattern Frequency'
 
-    for _, row in pattern_df.iterrows():
-        pattern = row[pattern_col]
-        frequency = row[freq_col]
+    succ_trans = {}
+    unsucc_trans = {}
 
-        if pd.isna(pattern):
-            continue
+    # Build transition dicts
+    for df, trans_dict in [(succ_df, succ_trans), (unsucc_df, unsucc_trans)]:
+        for _, row in df.iterrows():
+            pattern = str(row[pattern_col]).upper()
+            frequency = row[freq_col]
 
-        pattern = str(pattern).upper()
-        # Build transitions from this pattern, weighted by its frequency
-        for i in range(len(pattern) - 1):
-            from_aoi = pattern[i]
-            to_aoi = pattern[i + 1]
-            key = (from_aoi, to_aoi)
-            transitions[key] = transitions.get(key, 0) + frequency
+            if pattern == 'nan':
+                continue
 
-    return transitions
+            for i in range(len(pattern) - 1):
+                key = (pattern[i], pattern[i+1])
+                trans_dict[key] = trans_dict.get(key, 0) + frequency
 
-# Build transition matrices for each category using collapsed patterns
-successful_transitions = build_transition_matrix(successful_collapsed)
-unsuccessful_transitions = build_transition_matrix(unsuccessful_collapsed)
+    # Normalize by total transitions
+    succ_total = sum(succ_trans.values())
+    unsucc_total = sum(unsucc_trans.values())
 
-# Create transition matrix visualization
-all_aois = sorted(set([k[0] for k in successful_transitions.keys()] +
-                      [k[1] for k in successful_transitions.keys()] +
-                      [k[0] for k in unsuccessful_transitions.keys()] +
-                      [k[1] for k in unsuccessful_transitions.keys()]))
+    succ_trans = {k: v/succ_total*100 for k, v in succ_trans.items()}
+    unsucc_trans = {k: v/unsucc_total*100 for k, v in unsucc_trans.items()}
 
-def create_matrix(transitions, aois):
-    """Convert transition dict to matrix"""
-    matrix = np.zeros((len(aois), len(aois)))
-    for i, from_aoi in enumerate(aois):
-        for j, to_aoi in enumerate(aois):
-            matrix[i, j] = transitions.get((from_aoi, to_aoi), 0)
-    return matrix
+    # Calculate differences
+    all_transitions = set(list(succ_trans.keys()) + list(unsucc_trans.keys()))
+    differences = []
 
-successful_matrix = create_matrix(successful_transitions, all_aois)
-unsuccessful_matrix = create_matrix(unsuccessful_transitions, all_aois)
+    for trans in all_transitions:
+        succ_pct = succ_trans.get(trans, 0)
+        unsucc_pct = unsucc_trans.get(trans, 0)
+        diff = succ_pct - unsucc_pct
 
-# Normalize by row (from each AOI, what % goes to each other AOI)
-successful_matrix_norm = successful_matrix / (successful_matrix.sum(axis=1, keepdims=True) + 1e-10) * 100
-unsuccessful_matrix_norm = unsuccessful_matrix / (unsuccessful_matrix.sum(axis=1, keepdims=True) + 1e-10) * 100
+        # Only keep meaningful differences
+        if abs(diff) > 0.5:  # At least 0.5% difference
+            from_aoi, to_aoi = trans
+            differences.append({
+                'Transition': f"{aoi_map.get(from_aoi, from_aoi)} -> {aoi_map.get(to_aoi, to_aoi)}",
+                'Difference': diff,
+                'Successful': succ_pct,
+                'Unsuccessful': unsucc_pct
+            })
 
-# Create heatmap comparison
-aoi_labels = [aoi_map.get(a, a) for a in all_aois]
+    return sorted(differences, key=lambda x: abs(x['Difference']), reverse=True)[:12]
 
-fig1 = make_subplots(
-    rows=1, cols=2,
-    subplot_titles=('Successful Pilots', 'Unsuccessful Pilots'),
-    horizontal_spacing=0.12
-)
+diff_data = get_transition_differences(successful_collapsed, unsuccessful_collapsed)
+diff_df = pd.DataFrame(diff_data)
 
-fig1.add_trace(
-    go.Heatmap(
-        z=successful_matrix_norm,
-        x=aoi_labels,
-        y=aoi_labels,
-        colorscale='Greens',
-        text=successful_matrix_norm.round(1),
-        texttemplate='%{text}%',
-        textfont={"size": 9},
-        hovertemplate='From: %{y}<br>To: %{x}<br>Frequency: %{z:.1f}%<extra></extra>',
-        showscale=True,
-        colorbar=dict(x=0.46, title="% of<br>Transitions")
-    ),
-    row=1, col=1
-)
+# Create diverging bar chart
+colors = ['#2ecc71' if d > 0 else '#e74c3c' for d in diff_df['Difference']]
 
-fig1.add_trace(
-    go.Heatmap(
-        z=unsuccessful_matrix_norm,
-        x=aoi_labels,
-        y=aoi_labels,
-        colorscale='Reds',
-        text=unsuccessful_matrix_norm.round(1),
-        texttemplate='%{text}%',
-        textfont={"size": 9},
-        hovertemplate='From: %{y}<br>To: %{x}<br>Frequency: %{z:.1f}%<extra></extra>',
-        showscale=True,
-        colorbar=dict(x=1.02, title="% of<br>Transitions")
-    ),
-    row=1, col=2
-)
+fig1 = go.Figure()
 
-fig1.update_xaxes(title_text="To AOI", row=1, col=1)
-fig1.update_xaxes(title_text="To AOI", row=1, col=2)
-fig1.update_yaxes(title_text="From AOI", row=1, col=1)
-fig1.update_yaxes(title_text="From AOI", row=1, col=2)
+fig1.add_trace(go.Bar(
+    y=diff_df['Transition'],
+    x=diff_df['Difference'],
+    orientation='h',
+    marker_color=colors,
+    text=[f'{d:+.1f}pp' for d in diff_df['Difference']],
+    textposition='outside',
+    hovertemplate='<b>%{y}</b><br>' +
+                  'Successful: %{customdata[0]:.1f}%<br>' +
+                  'Unsuccessful: %{customdata[1]:.1f}%<br>' +
+                  'Difference: %{x:+.1f} percentage points<br>' +
+                  '<extra></extra>',
+    customdata=diff_df[['Successful', 'Unsuccessful']].values
+))
+
+fig1.add_vline(x=0, line_dash="dash", line_color="gray", line_width=2)
 
 fig1.update_layout(
-    title='AOI Transition Frequency Heatmap (Normalized by Row)',
-    height=600,
-    template='plotly_white'
-)
-
-fig1.write_html('scan_efficiency_transition_matrix.html')
-print("[OK] Created: scan_efficiency_transition_matrix.html")
-
-# ============================================================================
-# ANALYSIS 2: Transition Efficiency Metrics
-# ============================================================================
-
-def calculate_pattern_metrics(pattern_df, category):
-    """
-    Calculate weighted average efficiency metrics from pattern data
-    """
-    pattern_col = 'Pattern String'
-    freq_col = 'Proportional Pattern Frequency'
-
-    lengths = []
-    unique_counts = []
-
-    for _, row in pattern_df.iterrows():
-        pattern = row[pattern_col]
-        frequency = row[freq_col]
-
-        if pd.isna(pattern):
-            continue
-
-        pattern = str(pattern).upper()
-        length = len(pattern)
-        unique_aois = len(set(pattern))
-
-        # Weight by frequency
-        lengths.extend([length] * int(frequency * 1000))
-        unique_counts.extend([unique_aois] * int(frequency * 1000))
-
-    return lengths, unique_counts
-
-# Calculate efficiency metrics for both categories
-succ_lengths, succ_unique = calculate_pattern_metrics(successful_collapsed, 'Successful')
-unsucc_lengths, unsucc_unique = calculate_pattern_metrics(unsuccessful_collapsed, 'Unsuccessful')
-
-# Build dataframe for visualization
-efficiency_data = []
-for length in succ_lengths:
-    efficiency_data.append({'Category': 'Successful', 'Pattern_Length': length})
-for length in unsucc_lengths:
-    efficiency_data.append({'Category': 'Unsuccessful', 'Pattern_Length': length})
-
-efficiency_df = pd.DataFrame(efficiency_data)
-
-unique_data = []
-for unique in succ_unique:
-    unique_data.append({'Category': 'Successful', 'Unique_AOIs': unique})
-for unique in unsucc_unique:
-    unique_data.append({'Category': 'Unsuccessful', 'Unique_AOIs': unique})
-
-unique_df = pd.DataFrame(unique_data)
-
-# Visualization: Pattern Efficiency Comparison
-fig2 = make_subplots(
-    rows=1, cols=2,
-    subplot_titles=('Pattern Length Distribution', 'Unique AOI Coverage')
-)
-
-# Pattern Length
-for category, color in [('Successful', '#2ecc71'), ('Unsuccessful', '#e74c3c')]:
-    data = efficiency_df[efficiency_df['Category'] == category]['Pattern_Length']
-
-    fig2.add_trace(
-        go.Box(
-            y=data,
-            name=category,
-            marker_color=color,
-            showlegend=True,
-            boxmean='sd'
-        ),
-        row=1, col=1
-    )
-
-# Unique AOIs
-for category, color in [('Successful', '#2ecc71'), ('Unsuccessful', '#e74c3c')]:
-    data = unique_df[unique_df['Category'] == category]['Unique_AOIs']
-
-    fig2.add_trace(
-        go.Box(
-            y=data,
-            name=category,
-            marker_color=color,
-            showlegend=False,
-            boxmean='sd'
-        ),
-        row=1, col=2
-    )
-
-fig2.update_yaxes(title_text='Pattern Length', row=1, col=1)
-fig2.update_yaxes(title_text='Unique AOIs', row=1, col=2)
-
-fig2.update_layout(
-    title='Scan Pattern Efficiency Metrics (Collapsed Patterns, Excluding No_AOI)',
-    height=500,
-    template='plotly_white'
-)
-
-fig2.write_html('scan_efficiency_metrics.html')
-print("[OK] Created: scan_efficiency_metrics.html")
-
-# ============================================================================
-# ANALYSIS 3: Top Transition Pairs Comparison
-# ============================================================================
-
-def get_top_transitions(transitions, n=10):
-    """Get top N most frequent transitions"""
-    sorted_trans = sorted(transitions.items(), key=lambda x: x[1], reverse=True)
-    return sorted_trans[:n]
-
-top_successful = get_top_transitions(successful_transitions, 15)
-top_unsuccessful = get_top_transitions(unsuccessful_transitions, 15)
-
-# Create comparison bar chart
-transition_comparison = []
-
-# Get all unique transitions from top lists
-all_top_transitions = set([t[0] for t in top_successful] + [t[0] for t in top_unsuccessful])
-
-for trans in all_top_transitions:
-    from_aoi, to_aoi = trans
-    label = f"{aoi_map.get(from_aoi, from_aoi)} → {aoi_map.get(to_aoi, to_aoi)}"
-
-    succ_count = successful_transitions.get(trans, 0)
-    unsucc_count = unsuccessful_transitions.get(trans, 0)
-
-    transition_comparison.append({
-        'Transition': label,
-        'Successful': succ_count,
-        'Unsuccessful': unsucc_count,
-        'Difference': succ_count - unsucc_count
-    })
-
-transition_comp_df = pd.DataFrame(transition_comparison)
-transition_comp_df = transition_comp_df.sort_values('Difference', ascending=False).head(15)
-
-fig3 = go.Figure()
-
-fig3.add_trace(go.Bar(
-    y=transition_comp_df['Transition'],
-    x=transition_comp_df['Successful'],
-    name='Successful',
-    orientation='h',
-    marker_color='#2ecc71'
-))
-
-fig3.add_trace(go.Bar(
-    y=transition_comp_df['Transition'],
-    x=transition_comp_df['Unsuccessful'],
-    name='Unsuccessful',
-    orientation='h',
-    marker_color='#e74c3c'
-))
-
-fig3.update_layout(
-    title='Top 15 AOI Transitions: Successful vs Unsuccessful Pilots',
-    xaxis_title='Transition Count',
-    yaxis_title='AOI Transition',
-    barmode='group',
+    title='What Scanning Behaviors Separate Success from Failure?<br>' +
+          '<sub>Green = Successful pilots do this MORE | Red = Unsuccessful pilots do this MORE</sub>',
+    xaxis_title='Difference in Transition Frequency (percentage points)',
+    yaxis_title='',
     template='plotly_white',
-    height=700,
+    height=600,
     yaxis={'categoryorder': 'total ascending'}
 )
 
-fig3.write_html('scan_efficiency_top_transitions.html')
-print("[OK] Created: scan_efficiency_top_transitions.html")
+fig1.write_html('scan_efficiency_transition_differences.html')
+print("[OK] Created: scan_efficiency_transition_differences.html")
 
 # ============================================================================
-# ANALYSIS 4: Average Pattern Length Comparison (Expanded vs Collapsed)
+# VIZ 2: INSTRUMENT ATTENTION - Where do pilots focus?
 # ============================================================================
 
-def calc_avg_pattern_length(pattern_df):
-    """Calculate weighted average pattern length"""
+def calculate_instrument_attention(pattern_df):
+    """Calculate percentage of time each instrument appears in patterns"""
     pattern_col = 'Pattern String'
     freq_col = 'Proportional Pattern Frequency'
 
-    total_length = 0
-    total_freq = 0
+    appearances = {}
+    total = 0
 
     for _, row in pattern_df.iterrows():
-        pattern = row[pattern_col]
+        pattern = str(row[pattern_col]).upper()
         frequency = row[freq_col]
 
-        if pd.isna(pattern):
+        if pattern == 'nan':
             continue
 
-        pattern = str(pattern).upper()
-        total_length += len(pattern) * frequency
-        total_freq += frequency
+        # Count each AOI appearance in this pattern
+        for aoi in pattern:
+            appearances[aoi] = appearances.get(aoi, 0) + frequency
+            total += frequency
 
-    return total_length / total_freq if total_freq > 0 else 0
+    # Convert to percentages
+    return {k: v/total*100 for k, v in appearances.items()}
 
-# Calculate average lengths
-succ_collapsed_avg = calc_avg_pattern_length(successful_collapsed)
-unsucc_collapsed_avg = calc_avg_pattern_length(unsuccessful_collapsed)
-succ_expanded_avg = calc_avg_pattern_length(successful_expanded)
-unsucc_expanded_avg = calc_avg_pattern_length(unsuccessful_expanded)
+succ_attention = calculate_instrument_attention(successful_collapsed)
+unsucc_attention = calculate_instrument_attention(unsuccessful_collapsed)
 
-# Create comparison visualization
-fig4 = go.Figure()
+attention_data = []
+for aoi in aoi_map.keys():
+    attention_data.append({
+        'Instrument': aoi_map[aoi],
+        'Successful': succ_attention.get(aoi, 0),
+        'Unsuccessful': unsucc_attention.get(aoi, 0)
+    })
 
-categories = ['Successful', 'Unsuccessful']
-collapsed_vals = [succ_collapsed_avg, unsucc_collapsed_avg]
-expanded_vals = [succ_expanded_avg, unsucc_expanded_avg]
+attention_df = pd.DataFrame(attention_data)
+attention_df['Difference'] = attention_df['Successful'] - attention_df['Unsuccessful']
+attention_df = attention_df.sort_values('Successful', ascending=False)
 
-fig4.add_trace(go.Bar(
-    x=categories,
-    y=collapsed_vals,
-    name='Collapsed Patterns',
-    marker_color='#3498db',
-    text=[f'{v:.2f}' for v in collapsed_vals],
-    textposition='auto'
+fig2 = make_subplots(
+    rows=1, cols=2,
+    subplot_titles=('Instrument Attention Distribution', 'Difference (Successful - Unsuccessful)'),
+    specs=[[{"type": "bar"}, {"type": "bar"}]],
+    horizontal_spacing=0.15,
+    column_widths=[0.55, 0.45]
+)
+
+# Left: Grouped bar
+fig2.add_trace(go.Bar(
+    x=attention_df['Instrument'],
+    y=attention_df['Successful'],
+    name='Successful',
+    marker_color='#2ecc71',
+    text=[f'{v:.1f}%' for v in attention_df['Successful']],
+    textposition='outside'
+), row=1, col=1)
+
+fig2.add_trace(go.Bar(
+    x=attention_df['Instrument'],
+    y=attention_df['Unsuccessful'],
+    name='Unsuccessful',
+    marker_color='#e74c3c',
+    text=[f'{v:.1f}%' for v in attention_df['Unsuccessful']],
+    textposition='outside'
+), row=1, col=1)
+
+# Right: Difference
+colors = ['#2ecc71' if d > 0 else '#e74c3c' for d in attention_df['Difference']]
+fig2.add_trace(go.Bar(
+    x=attention_df['Instrument'],
+    y=attention_df['Difference'],
+    marker_color=colors,
+    showlegend=False,
+    text=[f'{d:+.1f}pp' for d in attention_df['Difference']],
+    textposition='outside'
+), row=1, col=2)
+
+fig2.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=2, line_width=2)
+
+fig2.update_xaxes(title_text="", row=1, col=1)
+fig2.update_xaxes(title_text="", row=1, col=2)
+fig2.update_yaxes(title_text="% of Fixations", row=1, col=1)
+fig2.update_yaxes(title_text="Percentage Points", row=1, col=2)
+
+fig2.update_layout(
+    title='Which Instruments Get The Most Attention?',
+    height=500,
+    template='plotly_white',
+    barmode='group'
+)
+
+fig2.write_html('scan_efficiency_instrument_attention.html')
+print("[OK] Created: scan_efficiency_instrument_attention.html")
+
+# ============================================================================
+# VIZ 3: SCAN PATH EFFICIENCY - Direct vs Backtracking
+# ============================================================================
+
+def analyze_scan_efficiency(pattern_df):
+    """
+    Measure scan path efficiency:
+    - Backtrack rate: How often do they return to the previous instrument?
+    - Cycle efficiency: avg transitions per unique instrument visited
+    """
+    pattern_col = 'Pattern String'
+    freq_col = 'Proportional Pattern Frequency'
+
+    total_backtracks = 0
+    total_transitions = 0
+
+    pattern_lengths = []
+    unique_instruments = []
+
+    for _, row in pattern_df.iterrows():
+        pattern = str(row[pattern_col]).upper()
+        frequency = row[freq_col]
+
+        if pattern == 'nan':
+            continue
+
+        # Count immediate backtracks (A->B->A pattern)
+        backtracks = 0
+        for i in range(len(pattern) - 2):
+            if pattern[i] == pattern[i+2] and pattern[i] != pattern[i+1]:
+                backtracks += 1
+
+        total_backtracks += backtracks * frequency
+        total_transitions += (len(pattern) - 1) * frequency
+
+        # Pattern metrics
+        pattern_lengths.extend([len(pattern)] * int(frequency * 1000))
+        unique_instruments.extend([len(set(pattern))] * int(frequency * 1000))
+
+    backtrack_rate = (total_backtracks / total_transitions * 100) if total_transitions > 0 else 0
+    avg_pattern_len = np.mean(pattern_lengths)
+    avg_unique = np.mean(unique_instruments)
+    efficiency = (avg_unique / avg_pattern_len * 100) if avg_pattern_len > 0 else 0
+
+    return {
+        'backtrack_rate': backtrack_rate,
+        'avg_pattern_length': avg_pattern_len,
+        'avg_unique_instruments': avg_unique,
+        'efficiency_score': efficiency
+    }
+
+succ_eff = analyze_scan_efficiency(successful_collapsed)
+unsucc_eff = analyze_scan_efficiency(unsuccessful_collapsed)
+
+# Create comparison
+metrics = ['Backtrack Rate (%)', 'Avg Pattern Length', 'Avg Unique Instruments', 'Efficiency Score (%)']
+succ_values = [succ_eff['backtrack_rate'], succ_eff['avg_pattern_length'],
+               succ_eff['avg_unique_instruments'], succ_eff['efficiency_score']]
+unsucc_values = [unsucc_eff['backtrack_rate'], unsucc_eff['avg_pattern_length'],
+                 unsucc_eff['avg_unique_instruments'], unsucc_eff['efficiency_score']]
+
+fig3 = go.Figure()
+
+x = np.arange(len(metrics))
+width = 0.35
+
+fig3.add_trace(go.Bar(
+    x=metrics,
+    y=succ_values,
+    name='Successful',
+    marker_color='#2ecc71',
+    text=[f'{v:.2f}' for v in succ_values],
+    textposition='outside'
 ))
 
-fig4.add_trace(go.Bar(
-    x=categories,
-    y=expanded_vals,
-    name='Expanded Patterns',
-    marker_color='#9b59b6',
-    text=[f'{v:.2f}' for v in expanded_vals],
-    textposition='auto'
+fig3.add_trace(go.Bar(
+    x=metrics,
+    y=unsucc_values,
+    name='Unsuccessful',
+    marker_color='#e74c3c',
+    text=[f'{v:.2f}' for v in unsucc_values],
+    textposition='outside'
 ))
 
-fig4.update_layout(
-    title='Average Pattern Length: Collapsed vs Expanded<br><sub>Larger gap = more repetitive scanning within same AOIs</sub>',
-    yaxis_title='Average Pattern Length',
-    xaxis_title='Pilot Category',
+fig3.update_layout(
+    title='Scan Path Efficiency Comparison<br>' +
+          '<sub>Lower backtrack = more decisive | Higher efficiency = better coverage</sub>',
+    yaxis_title='Value',
+    xaxis_title='',
     barmode='group',
     template='plotly_white',
     height=500
 )
 
-fig4.write_html('scan_efficiency_complexity.html')
-print("[OK] Created: scan_efficiency_complexity.html")
+fig3.write_html('scan_efficiency_metrics.html')
+print("[OK] Created: scan_efficiency_metrics.html")
 
 # ============================================================================
-# ANALYSIS 5: Network Diagram of Transitions
-# ============================================================================
-
-# Create network graph showing transition flows for successful pilots
-import plotly.graph_objects as go
-
-# Get top transitions for successful pilots
-top_trans = get_top_transitions(successful_transitions, 20)
-
-# Build edge list
-edge_x = []
-edge_y = []
-edge_text = []
-
-# Position nodes in a circle
-node_positions = {}
-n_nodes = len(all_aois)
-for i, aoi in enumerate(all_aois):
-    angle = 2 * np.pi * i / n_nodes
-    node_positions[aoi] = (np.cos(angle), np.sin(angle))
-
-# Create edges
-for (from_aoi, to_aoi), count in top_trans:
-    x0, y0 = node_positions[from_aoi]
-    x1, y1 = node_positions[to_aoi]
-
-    edge_x.extend([x0, x1, None])
-    edge_y.extend([y0, y1, None])
-    edge_text.append(f"{aoi_map.get(from_aoi, from_aoi)}→{aoi_map.get(to_aoi, to_aoi)}: {count}")
-
-edge_trace = go.Scatter(
-    x=edge_x, y=edge_y,
-    line=dict(width=0.5, color='#888'),
-    hoverinfo='none',
-    mode='lines'
-)
-
-node_x = [node_positions[aoi][0] for aoi in all_aois]
-node_y = [node_positions[aoi][1] for aoi in all_aois]
-node_text = [aoi_map.get(aoi, aoi) for aoi in all_aois]
-
-node_trace = go.Scatter(
-    x=node_x, y=node_y,
-    mode='markers+text',
-    text=node_text,
-    textposition="top center",
-    hoverinfo='text',
-    marker=dict(
-        showscale=False,
-        color='#2ecc71',
-        size=30,
-        line=dict(width=2, color='white')
-    )
-)
-
-fig5 = go.Figure(data=[edge_trace, node_trace],
-             layout=go.Layout(
-                title='AOI Transition Network - Successful Pilots (Top 20 Transitions)',
-                showlegend=False,
-                hovermode='closest',
-                margin=dict(b=0,l=0,r=0,t=40),
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                height=700,
-                template='plotly_white'
-                ))
-
-fig5.write_html('scan_efficiency_network.html')
-print("[OK] Created: scan_efficiency_network.html")
-
-# ============================================================================
-# STATISTICAL SUMMARY
+# STATISTICS SUMMARY
 # ============================================================================
 
 print("\n" + "="*80)
-print("SCAN EFFICIENCY SUMMARY STATISTICS")
+print("KEY FINDINGS - SCAN EFFICIENCY")
 print("="*80)
 
-print("\n--- PATTERN EFFICIENCY METRICS (Collapsed, Excluding No_AOI) ---")
-print("\nPattern Length:")
+print("\n1. INSTRUMENT ATTENTION")
 print("-" * 70)
-successful_len = efficiency_df[efficiency_df['Category'] == 'Successful']['Pattern_Length']
-unsuccessful_len = efficiency_df[efficiency_df['Category'] == 'Unsuccessful']['Pattern_Length']
+top_instrument = attention_df.iloc[0]
+print(f"   Most scanned overall: {top_instrument['Instrument']}")
+print(f"      Successful: {top_instrument['Successful']:.1f}%")
+print(f"      Unsuccessful: {top_instrument['Unsuccessful']:.1f}%")
 
-print(f"  Successful   - Mean: {successful_len.mean():.3f}, SD: {successful_len.std():.3f}")
-print(f"  Unsuccessful - Mean: {unsuccessful_len.mean():.3f}, SD: {unsuccessful_len.std():.3f}")
-print(f"  Difference   - {successful_len.mean() - unsuccessful_len.mean():.3f}")
+biggest_diff = attention_df.loc[attention_df['Difference'].abs().idxmax()]
+print(f"\n   Biggest difference: {biggest_diff['Instrument']} ({biggest_diff['Difference']:+.1f}pp)")
+if biggest_diff['Difference'] > 0:
+    print(f"      -> Successful pilots focus MORE on {biggest_diff['Instrument']}")
+else:
+    print(f"      -> Unsuccessful pilots focus MORE on {biggest_diff['Instrument']}")
 
-if unsuccessful_len.mean() != 0:
-    diff_percent = ((successful_len.mean() - unsuccessful_len.mean()) / unsuccessful_len.mean()) * 100
-    print(f"  % Difference - {diff_percent:.1f}%")
-
-print("\nUnique AOI Coverage:")
+print("\n2. SCANNING EFFICIENCY")
 print("-" * 70)
-successful_unique = unique_df[unique_df['Category'] == 'Successful']['Unique_AOIs']
-unsuccessful_unique = unique_df[unique_df['Category'] == 'Unsuccessful']['Unique_AOIs']
+print(f"   Backtrack Rate:")
+print(f"      Successful: {succ_eff['backtrack_rate']:.1f}%")
+print(f"      Unsuccessful: {unsucc_eff['backtrack_rate']:.1f}%")
+backtrack_diff = unsucc_eff['backtrack_rate'] - succ_eff['backtrack_rate']
+print(f"      -> Unsuccessful pilots backtrack {backtrack_diff:+.1f}pp MORE")
 
-print(f"  Successful   - Mean: {successful_unique.mean():.3f}, SD: {successful_unique.std():.3f}")
-print(f"  Unsuccessful - Mean: {unsuccessful_unique.mean():.3f}, SD: {unsuccessful_unique.std():.3f}")
-print(f"  Difference   - {successful_unique.mean() - unsuccessful_unique.mean():.3f}")
+print(f"\n   Efficiency Score (unique instruments / pattern length):")
+print(f"      Successful: {succ_eff['efficiency_score']:.1f}%")
+print(f"      Unsuccessful: {unsucc_eff['efficiency_score']:.1f}%")
+eff_diff = succ_eff['efficiency_score'] - unsucc_eff['efficiency_score']
+print(f"      -> Successful pilots are {eff_diff:+.1f}pp more efficient")
 
-if unsuccessful_unique.mean() != 0:
-    diff_percent = ((successful_unique.mean() - unsuccessful_unique.mean()) / unsuccessful_unique.mean()) * 100
-    print(f"  % Difference - {diff_percent:.1f}%")
-
-print("\n--- AVERAGE PATTERN LENGTHS (Collapsed vs Expanded) ---")
+print("\n3. CRITICAL TRANSITIONS (Top 3 differences)")
 print("-" * 70)
-print(f"  Successful   - Collapsed: {succ_collapsed_avg:.3f}, Expanded: {succ_expanded_avg:.3f}")
-print(f"                 Ratio: {succ_expanded_avg/succ_collapsed_avg:.3f}")
-print(f"  Unsuccessful - Collapsed: {unsucc_collapsed_avg:.3f}, Expanded: {unsucc_expanded_avg:.3f}")
-print(f"                 Ratio: {unsucc_expanded_avg/unsucc_collapsed_avg:.3f}")
-
-print("\n--- TOP 5 TRANSITIONS FOR SUCCESSFUL PILOTS ---")
-print("-" * 70)
-for i, ((from_aoi, to_aoi), count) in enumerate(top_successful[:5], 1):
-    print(f"  {i}. {aoi_map.get(from_aoi, from_aoi)} -> {aoi_map.get(to_aoi, to_aoi)}: {count:.3f} transitions")
-
-print("\n--- TOP 5 TRANSITIONS FOR UNSUCCESSFUL PILOTS ---")
-print("-" * 70)
-for i, ((from_aoi, to_aoi), count) in enumerate(top_unsuccessful[:5], 1):
-    print(f"  {i}. {aoi_map.get(from_aoi, from_aoi)} -> {aoi_map.get(to_aoi, to_aoi)}: {count:.3f} transitions")
+for idx, row in diff_df.head(3).iterrows():
+    direction = "MORE" if row['Difference'] > 0 else "LESS"
+    who = "Successful" if row['Difference'] > 0 else "Unsuccessful"
+    print(f"   {row['Transition']}")
+    print(f"      {who} pilots do this {abs(row['Difference']):.1f}pp {direction}")
 
 print("\n" + "="*80)
-print("KEY FINDINGS:")
+print("MAIN TAKEAWAY:")
 print("="*80)
 
-# Calculate key differences
-avg_pattern_diff = successful_len.mean() - unsuccessful_len.mean()
-avg_unique_diff = successful_unique.mean() - unsuccessful_unique.mean()
-succ_complexity_ratio = succ_expanded_avg / succ_collapsed_avg
-unsucc_complexity_ratio = unsucc_expanded_avg / unsucc_collapsed_avg
-avg_complexity_diff = succ_complexity_ratio - unsucc_complexity_ratio
-
-print(f"\n1. Pattern Length: Successful pilots had {'SHORTER' if avg_pattern_diff < 0 else 'LONGER'} scan patterns")
-print(f"   ({avg_pattern_diff:+.2f} AOIs on average)")
-
-print(f"\n2. AOI Coverage: Successful pilots covered {'MORE' if avg_unique_diff > 0 else 'FEWER'} unique AOIs")
-print(f"   ({avg_unique_diff:+.2f} unique AOIs on average)")
-
-print(f"\n3. Scanning Repetition: Successful pilots had {'MORE' if avg_complexity_diff > 0 else 'LESS'} repetitive fixations")
-print(f"   (Expansion ratio difference: {avg_complexity_diff:+.2f})")
-
-# Total transitions
-total_succ_trans = sum(successful_transitions.values())
-total_unsucc_trans = sum(unsuccessful_transitions.values())
-print(f"\n4. Total Transition Frequency: Successful: {total_succ_trans:.2f}, Unsuccessful: {total_unsucc_trans:.2f}")
+print(f"\nSuccessful pilots demonstrate:")
+print(f"  - {abs(backtrack_diff):.1f}pp LESS backtracking (more decisive)")
+print(f"  - {abs(eff_diff):.1f}pp HIGHER efficiency (better coverage per transition)")
+print(f"  - {abs(biggest_diff['Difference']):.1f}pp {'MORE' if biggest_diff['Difference'] > 0 else 'LESS'} attention on {biggest_diff['Instrument']}")
 
 print("\n" + "="*80)
-print("All scan efficiency visualizations created successfully!")
+print(f"Generated 3 focused visualizations")
 print("="*80)
-print("\nGenerated files:")
-print("  1. scan_efficiency_transition_matrix.html - Heatmap of AOI-to-AOI transitions")
-print("  2. scan_efficiency_metrics.html - Pattern efficiency metrics comparison")
-print("  3. scan_efficiency_top_transitions.html - Top transition pairs comparison")
-print("  4. scan_efficiency_complexity.html - Scan path complexity analysis")
-print("  5. scan_efficiency_network.html - Network diagram of successful pilot transitions")
