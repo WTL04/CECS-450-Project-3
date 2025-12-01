@@ -1,179 +1,345 @@
+import os
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from pathlib import Path
+import plotly.io as pio
 
-def load_sheet(path: Path, sheet_name: str) -> pd.DataFrame:
-    df = pd.read_excel(path, sheet_name=sheet_name)
-    df.columns = df.columns.str.strip().str.lower()
-    df = df.rename(columns={"pattern string": "Pattern"})
-    df["Metric"] = df["proportional pattern frequency"].astype(float)
-    df = df[~df["Pattern"].str.fullmatch(r"A+")]
+COLOR_MAP = {
+    "Successful": "#2ecc71",
+    "Unsuccessful": "#e74c3c",
+}
 
-    return df
+COLOR_MAP_DIFF = {
+    "Successful > Unsuccessful": "#2ecc71",
+    "Unsuccessful > Successful": "#e74c3c",
+}
 
-def plot_top(df_s: pd.DataFrame, df_u: pd.DataFrame, title: str) -> str:
-    df_s2 = df_s.copy()
-    df_s2["Group"] = "Successful"
+COLLAPSED_FILE = "datasets/Collapsed Patterns (Group).xlsx"
+EXPANDED_FILE = "datasets/Expanded Patterns (Group).xlsx"
+OUTPUT_DIR = "outputs"
+OUTPUT_HTML = os.path.join(OUTPUT_DIR, "pattern_analysis_dashboard.html")
 
-    df_u2 = df_u.copy()
-    df_u2["Group"] = "Unsuccessful"
+AOI_LEGEND = {
+    "A": "No AOI",
+    "B": "Alt_VSI",
+    "C": "AI",
+    "D": "TI_HSI",
+    "E": "SSI",
+    "F": "ASI",
+    "G": "RPM",
+    "H": "Window",
+}
 
-    both = pd.concat([df_s2, df_u2], ignore_index=True)
-    both = both.sort_values("Metric", ascending=False).head(10)
+def load_patterns(excel_path: str, pattern_type: str) -> pd.DataFrame:
+    xls = pd.ExcelFile(excel_path)
+    frames = []
+
+    for sheet in xls.sheet_names:
+        df = xls.parse(sheet)
+
+        if "Succesful" in sheet:
+            group = "Successful"
+        else:
+            group = "Unsuccessful"
+
+        if "Excluding" in sheet:
+            aoi_filter = "Exclude No AOI (A)"
+        else:
+            aoi_filter = "All AOIs"
+        df["Group"] = group
+        df["AOI_Filter"] = aoi_filter
+        df["PatternType"] = pattern_type
+        df["Pattern Length"] = df["Pattern String"].astype(str).str.len()
+        frames.append(df)
+    return pd.concat(frames, ignore_index=True)
+
+def top_patterns_bar(df: pd.DataFrame, title: str, top_n: int = 15):
+    totals = (
+        df.groupby("Pattern String")["Frequency"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(top_n)
+    )
+    top_patterns = list(totals.index)
+
+    plot_df = df[df["Pattern String"].isin(top_patterns)].copy()
+    plot_df["Pattern String"] = pd.Categorical(
+        plot_df["Pattern String"],
+        categories=top_patterns,
+        ordered=True,
+    )
 
     fig = px.bar(
-        both,
-        x="Pattern",
-        y="Metric",
+        plot_df,
+        x="Pattern String",
+        y="Proportional Pattern Frequency",
         color="Group",
         barmode="group",
         title=title,
-        hover_data={"Metric": ":.6f"}
+        labels={
+            "Pattern String": "AOI Pattern",
+            "Proportional Pattern Frequency": "Proportional Pattern Frequency",
+            "Group": "Approach Outcome",
+        },
     )
+    for trace in fig.data:
+        group_name = trace.name
+        if group_name in COLOR_MAP:
+            trace.marker.color = COLOR_MAP[group_name]
 
     fig.update_layout(
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#f7fafc",
-        xaxis_title="Pattern",
-        yaxis_title="Proportional Pattern Frequency",
-        hovermode="closest",
-        title_x=0.5,
-        showlegend=True,
-        legend=dict(
-            x=0.95,           
-            y=1.0,
-            xanchor="left",
-            yanchor="top",
-            bgcolor="rgba(255,255,255,0.7)",
-            bordercolor="black",
-            borderwidth=0.5
-        ),
-        margin=dict(r=140)
+        xaxis_tickangle=-45,
+        hovermode="x unified",
     )
-    return fig.to_html(full_html=False, include_plotlyjs=False)
+    return fig
 
-def plot_diff(df_s: pd.DataFrame, df_u: pd.DataFrame, title: str) -> str:
-    s = df_s[["Pattern", "Metric"]].rename(columns={"Metric": "Success"})
-    u = df_u[["Pattern", "Metric"]].rename(columns={"Metric": "Unsuccessful"})
 
-    merged = pd.merge(s, u, on="Pattern", how="outer").fillna(0.0)
-    merged["Diff"] = merged["Success"] - merged["Unsuccessful"]
-    pos = merged[merged["Diff"] > 0].sort_values("Diff", ascending=False).head(5)
-    neg = merged[merged["Diff"] < 0].sort_values("Diff", ascending=True).head(5)
-
-    final = pd.concat([pos, neg], ignore_index=True)
-    final["Color"] = final["Diff"].apply(
-        lambda x: "#2f855a" if x > 0 else "#e53e3e"
+def difference_bar(df: pd.DataFrame, title: str, top_each_side: int = 10):
+    pivot = df.pivot_table(
+        index="Pattern String",
+        columns="Group",
+        values="Proportional Pattern Frequency",
+        aggfunc="mean",
+        fill_value=0.0,
     )
+
+    if "Successful" not in pivot.columns or "Unsuccessful" not in pivot.columns:
+        return px.bar(title=title)
+
+    pivot["Difference"] = pivot["Successful"] - pivot["Unsuccessful"]
+    pivot = pivot[pivot["Difference"] != 0]
+    top_pos = pivot.sort_values("Difference", ascending=False).head(top_each_side)
+    top_neg = pivot.sort_values("Difference", ascending=True).head(top_each_side)
+
+    subset = pd.concat([top_pos, top_neg]).reset_index()
+    subset["Direction"] = subset["Difference"].apply(
+        lambda v: "Successful > Unsuccessful" if v > 0 else "Unsuccessful > Successful"
+    )
+
+    fig = px.bar(
+        subset,
+        x="Pattern String",
+        y="Difference",
+        color="Direction",
+        title=title,
+        labels={
+            "Pattern String": "AOI Pattern",
+            "Difference": "Proportional Frequency (Success - Unsuccess)",
+            "Direction": "Which Group Looks Here More",
+        },
+        color_discrete_map=COLOR_MAP_DIFF,
+    )
+    fig.update_layout(
+        xaxis_tickangle=-45,
+        hovermode="x unified",
+    )
+    return fig
+
+
+def length_hist(df: pd.DataFrame, title: str, top_n: int = 10):
+    import plotly.graph_objects as go
+    totals = (
+        df.groupby(["Pattern Length", "Group"])["Frequency"]
+        .sum()
+        .reset_index(name="TotalFrequency")
+    )
+
+    df_sorted = df.sort_values(
+        ["Pattern Length", "Group", "Frequency"],
+        ascending=[True, True, False]
+    )
+
+    top_patterns = (
+        df_sorted.groupby(["Pattern Length", "Group"], group_keys=False)
+        .head(top_n)
+        .groupby(["Pattern Length", "Group"])
+        .apply(lambda g: "<br>".join(
+            [f"{row['Pattern String']} ({row['Frequency']})"
+             for _, row in g.iterrows()]
+        ))
+        .reset_index(name="PatternDetails")
+    )
+
+    merged = totals.merge(
+        top_patterns,
+        on=["Pattern Length", "Group"],
+        how="left"
+    )
+
+    success_df = merged[merged["Group"] == "Successful"]
+    unsuccess_df = merged[merged["Group"] == "Unsuccessful"]
 
     fig = go.Figure()
+
     fig.add_trace(go.Bar(
-        x=final["Pattern"],
-        y=final["Diff"],
-        marker_color=final["Color"],
-        text=final["Diff"].round(6),
-        textposition="outside",
-        customdata=final[["Success", "Unsuccessful"]],
+        name="Successful",
+        x=success_df["Pattern Length"],
+        y=success_df["TotalFrequency"],
+        customdata=success_df["PatternDetails"],
+        marker_color=COLOR_MAP["Successful"],
         hovertemplate=(
-            "<b>Pattern:</b> %{x}<br>"
-            "<b>Difference:</b> %{y:.6f}<extra></extra>"
-        ),
-        showlegend=False
+            "<b>Group:</b> Successful<br>"
+            "<b>Pattern Length:</b> %{x}<br>"
+            "<b>Total Occurrences:</b> %{y}<br><br>"
+            "<b>Top Patterns:</b><br>%{customdata}"
+            "<extra></extra>"
+        )
     ))
+
+    fig.add_trace(go.Bar(
+        name="Unsuccessful",
+        x=unsuccess_df["Pattern Length"],
+        y=unsuccess_df["TotalFrequency"],
+        customdata=unsuccess_df["PatternDetails"],
+        marker_color=COLOR_MAP["Unsuccessful"],
+        hovertemplate=(
+            "<b>Group:</b> Unsuccessful<br>"
+            "<b>Pattern Length:</b> %{x}<br>"
+            "<b>Total Occurrences:</b> %{y}<br><br>"
+            "<b>Top Patterns:</b><br>%{customdata}"
+            "<extra></extra>"
+        )
+    ))
+
     fig.update_layout(
+        barmode="group",
         title=title,
-        yaxis_title="Difference (Success – Unsuccessful)",
-        plot_bgcolor="#ffffff",
-        paper_bgcolor="#f7fafc",
-        hovermode="closest",
-        title_x=0.5,
-        showlegend=True,
-        legend=dict(
-            x=0.98,
-            y=1.0,
-            xanchor="left",
-            yanchor="top",
-            bgcolor="rgba(255,255,255,0.7)",
-            bordercolor="black",
-            borderwidth=1
-        ),
-        margin=dict(r=150)
-    )
-    fig.add_hline(y=0, line_dash="dash", line_color="black")
-
-    fig.add_trace(go.Bar(
-        x=[None], y=[None],
-        marker_color="#2f855a",
-        name="Successful > Unsuccessful",
-        showlegend=True
-    ))
-    fig.add_trace(go.Bar(
-        x=[None], y=[None],
-        marker_color="#e53e3e",
-        name="Unsuccessful > Successful",
-        showlegend=True
-    ))
-
-    return fig.to_html(full_html=False, include_plotlyjs=False)
-
-def run_mode(path: Path, collapsed: bool, exclude_noaoi: bool, html_parts: list):
-    mode_label = "Collapsed" if collapsed else "Expanded"
-    aoi_label = "Excluding No AOI" if exclude_noaoi else "Including No AOI"
-
-    sheet_s = "Succesful Excluding No AOI(A)" if exclude_noaoi else "Succesful"
-    sheet_u = "Unsuccesful Excluding No AOI(A)" if exclude_noaoi else "Unsuccesful"
-
-    df_s = load_sheet(path, sheet_s)
-    df_u = load_sheet(path, sheet_u)
-
-    html_parts.append(f"<h2>{mode_label} ({aoi_label})</h2>")
-
-    html_parts.append(f"<h3>Top 10 Patterns</h3>")
-    html_parts.append(
-        plot_top(
-            df_s,
-            df_u,
-            f"Top 10 Patterns — {mode_label} ({aoi_label})"
-        )
+        xaxis_title="Pattern Length (# AOIs in pattern)",
+        yaxis_title="Total Pattern Occurrences",
+        hovermode="closest"
     )
 
-    html_parts.append(f"<h3>Pattern Differences</h3>")
-    html_parts.append(
-        plot_diff(
-            df_s,
-            df_u,
-            f"Pattern Differences — {mode_label} ({aoi_label})"
-        )
-    )
+    return fig
+
+def build_aoi_legend_html() -> str:
+    """
+    AOI mapping + short explanations of Proportional Pattern Frequency
+    and Difference, with simple examples.
+    """
+
+    rows = []
+    for letter, desc in AOI_LEGEND.items():
+        rows.append(f"<tr><td><strong>{letter}</strong></td><td>{desc}</td></tr>")
+
+    html = f"""
+    <div style="display:flex; gap:32px; flex-wrap:wrap; align-items:flex-start;">
+      <div>
+        <h3>AOI Letters</h3>
+        <table border="1" cellpadding="6" cellspacing="0"
+               style="border-collapse:collapse; max-width:400px;">
+          <thead>
+            <tr>
+              <th>Letter</th>
+              <th>AOI</th>
+            </tr>
+          </thead>
+          <tbody>
+            {''.join(rows)}
+          </tbody>
+        </table>
+      </div>
+      <div style="max-width:420px;">
+        <h3>Pattern Metrics</h3>
+        <ul>
+          <li>
+            <b>Proportional Pattern Frequency</b>: share of all patterns for a group
+            that match a specific pattern.<br>
+            Example: 0.08 for pattern <b>ADA</b> means 8% of all patterns
+            for that group are ADA.
+          </li>
+          <li style="margin-top:8px;">
+            <b>Proportional Frequency</b> (Success - Unsuccess): how much more
+            common a pattern is for successful pilots.<br>
+            Example: +0.03 for <b>ADA</b> means ADA is 3 percentage
+            points more common in successful than unsuccessful approaches
+            (green bars = more in successful, red = more in unsuccessful).
+          </li>
+        </ul>
+      </div>
+
+    </div>
+    """
+    return html
 
 def main():
-    outdir = Path("outputs")
-    outdir.mkdir(exist_ok=True)
+    if not os.path.exists(COLLAPSED_FILE):
+        raise FileNotFoundError(f"Missing file: {COLLAPSED_FILE}")
+    if not os.path.exists(EXPANDED_FILE):
+        raise FileNotFoundError(f"Missing file: {EXPANDED_FILE}")
 
-    html = []
-    html.append("<html><head><title>Pattern Analysis Dashboard</title>")
+    collapsed_df = load_patterns(COLLAPSED_FILE, pattern_type="Collapsed")
+    expanded_df = load_patterns(EXPANDED_FILE, pattern_type="Expanded")
 
-    html.append('<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>')
+    collapsed_all = collapsed_df[collapsed_df["AOI_Filter"] == "All AOIs"].copy()
+    expanded_all = expanded_df[expanded_df["AOI_Filter"] == "All AOIs"].copy()
 
-    html.append("</head><body>")
-    html.append("<h1>Pattern Analysis Dashboard</h1>")
+    figs = []
 
-    COLLAPSED = Path("datasets") / "Collapsed Patterns (Group).xlsx"
-    EXPANDED = Path("datasets") / "Expanded Patterns (Group).xlsx"
+    figs.append(
+        top_patterns_bar(
+            collapsed_all,
+            "Top 15 Collapsed Patterns by Proportional Frequency (All AOIs)",
+        )
+    )
 
-    run_mode(COLLAPSED, collapsed=True,  exclude_noaoi=False, html_parts=html)
-    run_mode(COLLAPSED, collapsed=True,  exclude_noaoi=True,  html_parts=html)
-    run_mode(EXPANDED,  collapsed=False, exclude_noaoi=False, html_parts=html)
-    run_mode(EXPANDED,  collapsed=False, exclude_noaoi=True,  html_parts=html)
+    figs.append(
+        top_patterns_bar(
+            expanded_all,
+            "Top 15 Expanded Patterns by Proportional Frequency (All AOIs)",
+        )
+    )
+    figs.append(
+        difference_bar(
+            collapsed_all,
+            "Collapsed Patterns: Largest Differences in Proportional Frequency "
+            "(Successful − Unsuccessful)",
+        )
+    )
+    figs.append(
+        difference_bar(
+            expanded_all,
+            "Expanded Patterns: Largest Differences in Proportional Frequency "
+            "(Successful − Unsuccessful)",
+        )
+    )
+    figs.append(
+        length_hist(
+            collapsed_all,
+            "Collapsed Patterns: Pattern Length Distribution (Weighted by Frequency)",
+        )
+    )
+    figs.append(
+        length_hist(
+            expanded_all,
+            "Expanded Patterns: Pattern Length Distribution (Weighted by Frequency)",
+        )
+    )
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    html.append("</body></html>")
+    html_parts = []
+    for i, fig in enumerate(figs):
+        include_js = "cdn" if i == 0 else False
+        fragment = pio.to_html(
+            fig,
+            include_plotlyjs=include_js,
+            full_html=False,
+        )
+        html_parts.append(fragment)
 
-    output_file = outdir / "pattern_analysis_dashboard.html"
-    output_file.write_text("\n".join(html), encoding="utf-8")
+    legend_html = build_aoi_legend_html()
 
-    print(f"Dashboard saved to {output_file}")
+    full_html = (
+        "<html><head><meta charset='utf-8'>"
+        "<title>Pattern Analysis Dashboard</title></head><body>\n"
+    )
+    full_html += "<h1>Pattern Analysis: Successful vs Unsuccessful Approaches</h1>\n"
+    full_html += legend_html
+    full_html += "<hr>\n"
+    full_html += "<hr>\n".join(html_parts)
+    full_html += "\n</body></html>"
 
+    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
+        f.write(full_html)
+    print(f"Saved dashboard to: {OUTPUT_HTML}")
 
 if __name__ == "__main__":
     main()
