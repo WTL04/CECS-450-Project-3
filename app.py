@@ -38,10 +38,14 @@ def get_base64_image(image_path):
         return base64.b64encode(f.read()).decode()
 
 def cockpit_figure(selected_aoi):
-
-    # display cockpit image
+    SCALE = 0.7 # scale figure size
     encoded_image = get_base64_image(COCKPIT_IMAGE_PATH)
     fig = go.Figure()
+
+    scaled_w = IMAGE_WIDTH * SCALE
+    scaled_h = IMAGE_HEIGHT * SCALE
+
+    # background image
     if encoded_image:
         fig.add_layout_image(
             dict(
@@ -49,9 +53,9 @@ def cockpit_figure(selected_aoi):
                 xref="x",
                 yref="y",
                 x=0,
-                y=IMAGE_HEIGHT,
-                sizex=IMAGE_WIDTH,
-                sizey=IMAGE_HEIGHT,
+                y=scaled_h,
+                sizex=scaled_w,
+                sizey=scaled_h,
                 xanchor="left",
                 yanchor="top",
                 sizing="stretch",
@@ -59,25 +63,31 @@ def cockpit_figure(selected_aoi):
             )
         )
 
-    # display AOI boxes on top of cockpit image
+    # AOI boxes, scaled
     for aoi, coords in AOI_COORDS.items():
+        x0 = coords["x0"] * SCALE
+        y0 = coords["y0"] * SCALE
+        x1 = coords["x1"] * SCALE
+        y1 = coords["y1"] * SCALE
+
         boxcolor = "#32CD32" if aoi == selected_aoi else "#FF6347"
-        opacity = 0.5 if aoi == selected_aoi else 0.30
+        opacity = 0.32 if aoi == selected_aoi else 0.14
+
         fig.add_shape(
             type="rect",
-            x0=coords["x0"], y0=coords["y0"],
-            x1=coords["x1"], y1=coords["y1"],
+            x0=x0, y0=y0,
+            x1=x1, y1=y1,
             line=dict(color=boxcolor, width=4 if aoi == selected_aoi else 2),
             fillcolor=boxcolor,
             opacity=opacity,
         )
 
-    fig.update_xaxes(visible=False, range=[0, IMAGE_WIDTH])
-    fig.update_yaxes(visible=False, range=[0, IMAGE_HEIGHT])
+    fig.update_xaxes(visible=False, range=[0, scaled_w])
+    fig.update_yaxes(visible=False, range=[0, scaled_h])
     fig.update_layout(
         autosize=False,
-        width=IMAGE_WIDTH,
-        height=IMAGE_HEIGHT+60,
+        width=scaled_w,
+        height=scaled_h + 40,
         margin=dict(l=0, r=0, t=40, b=0),
         title="Cockpit AOI Map"
     )
@@ -158,22 +168,42 @@ app.layout = html.Div([
             style={"width": "85%", "margin-bottom": "15px", "fontWeight": "bold"}
         ),
         dcc.Graph(id="cockpit-image"),
-    ], style={'flex': '1', 'min-width': "1050px", 'padding': '20px', "background":"#f6f6fa"}),
+    ], style={'flex': '1', 'min-width': "700px", 'padding': '20px', "background":"#f6f6fa"}),
     html.Div([
-        dcc.Graph(id="bar-chart", config={"displayModeBar": False}),
-        dcc.Graph(id="main-chart", config={"displayModeBar": False}),
-    ], style={'flex': '2', 'padding': '20px'}),
+        dcc.Tabs(
+            id="viz-tabs",
+            value="tab-bar",
+            children=[
+                dcc.Tab(label="Mean Fixation Bar Chart", value="tab-bar"),
+                dcc.Tab(label="Parallel Coordinates", value="tab-main"),
+            ],
+            style={"margin-bottom": "5px", "margin-top" : "5px"}
+        ),
+
+        # Single graph that swaps content based on tab
+        dcc.Graph(id="right-graph", config={"displayModeBar": False})
+
+    ], style={'flex': '2', 'padding': '50px'}),
 ], style={"display": "flex", "flexDirection": "row", "height":"100vh", "fontFamily":"Arial"})
 
 @app.callback(
     Output('cockpit-image', 'figure'),
-    Output('bar-chart', 'figure'),
-    Output('main-chart', 'figure'),
-    Input('aoi-dropdown', 'value')
+    Output('right-graph', 'figure'),
+    Input('aoi-dropdown', 'value'),
+    Input("viz-tabs", "value"),
 )
-def update_all(selected_aoi):
-    return (cockpit_figure(selected_aoi), build_bar_figure(selected_aoi), build_main_figure(selected_aoi))
 
+# switches visualization with tabs
+def update_all(selected_aoi, selected_tab):
+
+    cockpit_fig = cockpit_figure(selected_aoi)
+
+    if selected_tab == "tab-bar":
+        right_fig = build_bar_figure(selected_aoi)
+    else:
+        right_fig = build_main_figure(selected_aoi)
+
+    return cockpit_fig, right_fig
 
 if __name__ == "__main__":
     app.run(debug=True)
