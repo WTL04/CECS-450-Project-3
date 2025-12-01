@@ -4,11 +4,11 @@ import plotly.graph_objs as go
 import base64, os
 import pandas as pd
 
-# Updated: Cockpit image dimensions from your screenshot!
+
 COCKPIT_IMAGE_PATH = "images/cockpit.png"
 IMAGE_WIDTH, IMAGE_HEIGHT = 1199, 675
 
-# AOI display names for user-friendly titles
+
 AOI_TITLES = {
     "AI": "Attitude Indicator (AI)",
     "Alt_VSI": "Altitude/Vert. Speed (Alt-VSI)",
@@ -16,22 +16,21 @@ AOI_TITLES = {
     "SSI": "Standby Instruments (SSI)",
     "TI_HSI": "Turn Indicator/HSI (TI-HSI)",
     "RPM": "RPM Gauge",
-    "Window": "Window",
+    "Window": "Window"
 }
-
 def pretty_aoi(aoi):
     return AOI_TITLES.get(aoi, aoi.replace("_", " ").title())
 
-# AOI bounding boxes (update for precision!)
-AOI_LIST = ["AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"]
+
+AOI_LIST = list(AOI_TITLES.keys())
 AOI_COORDS = {
-    "AI":      {"x0": 540, "y0": 340, "x1": 620, "y1": 420, "label":AOI_TITLES["AI"]},
-    "Alt_VSI": {"x0": 640, "y0": 340, "x1": 720, "y1": 420, "label":AOI_TITLES["Alt_VSI"]},
-    "ASI":     {"x0": 540, "y0": 440, "x1": 620, "y1": 520, "label":AOI_TITLES["ASI"]},
-    "SSI":     {"x0": 640, "y0": 440, "x1": 720, "y1": 520, "label":AOI_TITLES["SSI"]},
-    "TI_HSI":  {"x0": 590, "y0": 520, "x1": 670, "y1": 600, "label":AOI_TITLES["TI_HSI"]},
-    "RPM":     {"x0": 950, "y0": 350, "x1": 1080, "y1": 470, "label":AOI_TITLES["RPM"]},
-    "Window":  {"x0": 50, "y0": 50, "x1": 1150, "y1": 200, "label":AOI_TITLES["Window"]},
+    "AI":      {"x0": 540, "y0": 420, "x1": 620, "y1": 500, "label":AOI_TITLES["AI"]},
+    "Alt_VSI": {"x0": 640, "y0": 420, "x1": 720, "y1": 500, "label":AOI_TITLES["Alt_VSI"]},
+    "ASI":     {"x0": 540, "y0": 520, "x1": 620, "y1": 600, "label":AOI_TITLES["ASI"]},
+    "SSI":     {"x0": 640, "y0": 520, "x1": 720, "y1": 600, "label":AOI_TITLES["SSI"]},
+    "TI_HSI":  {"x0": 590, "y0": 640, "x1": 670, "y1": 720, "label":AOI_TITLES["TI_HSI"]},
+    "RPM":     {"x0": 950, "y0": 420, "x1": 1080, "y1": 540, "label":AOI_TITLES["RPM"]},
+    "Window":  {"x0": 50, "y0": 50, "x1": 1150, "y1": 200, "label":AOI_TITLES["Window"]}
 }
 DATA_PATH = "./datasets/AOI_DGMs.csv"
 
@@ -45,8 +44,7 @@ def get_base64_image(image_path):
 def cockpit_figure(selected_aoi):
     encoded_image = get_base64_image(COCKPIT_IMAGE_PATH)
     fig = go.Figure()
-
-    # Draw background cockpit image
+    # Draw image background
     if encoded_image:
         fig.add_layout_image(
             dict(
@@ -57,26 +55,26 @@ def cockpit_figure(selected_aoi):
                 layer="below"
             )
         )
+    # AOI overlays
     for aoi, coords in AOI_COORDS.items():
-        boxcolor = "limegreen" if aoi == selected_aoi else "orangered"
+        boxcolor = "#32CD32" if aoi == selected_aoi else "#FF6347"
         opacity = 0.32 if aoi == selected_aoi else 0.14
         fig.add_shape(
             type="rect",
             x0=coords["x0"], y0=coords["y0"],
             x1=coords["x1"], y1=coords["y1"],
-            line=dict(color=boxcolor, width=3 if aoi == selected_aoi else 1),
+            line=dict(color=boxcolor, width=4 if aoi == selected_aoi else 2),
             fillcolor=boxcolor,
             opacity=opacity,
-            layer="above"
         )
         fig.add_annotation(
             x=(coords["x0"] + coords["x1"]) / 2,
-            y=coords["y0"] - 17,
-            text=coords["label"],
+            y=(coords["y0"] + coords["y1"]) / 2,
+            text=coords["label"].split("(")[0].replace("/","<br>"),  # only main label
             showarrow=False,
-            font=dict(size=18, color='white' if aoi == selected_aoi else 'black'),
+            font=dict(size=18, color='white' if aoi == selected_aoi else 'black', family="Arial"),
             bgcolor=boxcolor,
-            opacity=0.70,
+            opacity=0.95,
         )
     fig.update_xaxes(visible=False, range=[0, IMAGE_WIDTH])
     fig.update_yaxes(visible=False, range=[0, IMAGE_HEIGHT])
@@ -101,12 +99,13 @@ def build_bar_figure(selected_aoi):
     unsuccess_mean = data[data["pilot_success"] == "Unsuccessful"][col].mean()
     fig = go.Figure(data=[
         go.Bar(x=["Successful", "Unsuccessful"], y=[success_mean, unsuccess_mean],
-            marker_color=["royalblue", "firebrick"])
+            marker_color=["#1f77b4", "#d62728"])
     ])
     fig.update_layout(
         title=f"{pretty_aoi(selected_aoi)}: Mean Proportion of Fixations",
         xaxis_title="Pilot Success Group",
-        yaxis_title="Mean Proportion"
+        yaxis_title="Mean Proportion",
+        font=dict(size=16)
     )
     return fig
 
@@ -130,7 +129,7 @@ def build_main_figure(selected_aoi):
     fig = go.Figure(data=[go.Parcoords(
         line=dict(
             color=color_map,
-            colorscale=[[0, 'firebrick'], [1, 'royalblue']],
+            colorscale=[[0, '#d62728'], [1, '#1f77b4']],
             colorbar=dict(
                 title="Pilot Success",
                 tickvals=[0, 1],
@@ -139,7 +138,7 @@ def build_main_figure(selected_aoi):
         ),
         dimensions=dims
     )])
-    fig.update_layout(title=f"Parallel Coordinates – {pretty_aoi(selected_aoi)}", margin=dict(t=60))
+    fig.update_layout(title=f"Parallel Coordinates – {pretty_aoi(selected_aoi)}", margin=dict(t=55), font=dict(size=15))
     return fig
 
 app = dash.Dash(__name__)
@@ -153,15 +152,15 @@ app.layout = html.Div([
             options=[{"label": AOI_TITLES[aoi], "value": aoi} for aoi in AOI_LIST],
             value=AOI_LIST[0],
             clearable=False,
-            style={"width": "85%", "margin-bottom": "15px"}
+            style={"width": "85%", "margin-bottom": "15px", "fontWeight": "bold", "fontSize":"1.1rem"}
         ),
         dcc.Graph(id="cockpit-image"),
-    ], style={'flex': '1', 'min-width': "500px", 'padding': '20px', "background":"#f6f6fa"}),
+    ], style={'flex': '1', 'min-width': "450px", 'padding': '20px', "background":"#f6f6fa"}),
     html.Div([
         dcc.Graph(id="bar-chart", config={"displayModeBar": False}),
         dcc.Graph(id="main-chart", config={"displayModeBar": False}),
     ], style={'flex': '2', 'padding': '20px'}),
-], style={"display": "flex", "flexDirection": "row", "height":"100vh"})
+], style={"display": "flex", "flexDirection": "row", "height":"100vh", "fontFamily":"Arial"})
 
 @app.callback(
     Output('cockpit-image', 'figure'),
@@ -183,4 +182,3 @@ if __name__ == "__main__":
         webbrowser.open("http://127.0.0.1:8050/")
     threading.Thread(target=open_browser).start()
     app.run(debug=True)
-
