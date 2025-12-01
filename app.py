@@ -62,9 +62,9 @@ def cockpit_figure(selected_aoi):
         fig.add_annotation(
             x=(coords["x0"] + coords["x1"]) / 2,
             y=(coords["y0"] + coords["y1"]) / 2,
-            text=coords["label"].split("(")[0].replace("/","<br>"),
+            text=coords["label"].split("(")[0].replace("/"," "),
             showarrow=False,
-            font=dict(size=18, color='white' if aoi == selected_aoi else 'black', family="Arial"),
+            font=dict(size=16, color='white' if aoi == selected_aoi else 'black', family="Arial"),
             bgcolor=boxcolor,
             opacity=0.95,
         )
@@ -75,7 +75,7 @@ def cockpit_figure(selected_aoi):
         width=IMAGE_WIDTH,
         height=IMAGE_HEIGHT+60,
         margin=dict(l=0, r=0, t=40, b=0),
-        title={"text": "Cockpit AOI Map", "font": {"size": 22, "family": "Arial"}}
+        title="Cockpit AOI Map"
     )
     return fig
 
@@ -94,10 +94,9 @@ def build_bar_figure(selected_aoi):
             marker_color=["#1f77b4", "#d62728"])
     ])
     fig.update_layout(
-        title={"text":f"{pretty_aoi(selected_aoi)}: Mean Proportion of Fixations", "font":{"size":24}},
+        title=f"{pretty_aoi(selected_aoi)}: Mean Proportion of Fixations",
         xaxis_title="Pilot Success Group",
         yaxis_title="Mean Proportion",
-        font=dict(size=16),
         margin=dict(t=60)
     )
     return fig
@@ -131,18 +130,13 @@ def build_main_figure(selected_aoi):
                 title="Pilot Success",
                 tickvals=[0, 1],
                 ticktext=["Unsuccessful", "Successful"],
-                titlefont=dict(size=18, family="Arial"),
-                tickfont=dict(size=16, family="Arial"),
             )
         ),
         dimensions=dims,
-        labelfont=dict(size=20, family="Arial", color="black"),
-        tickfont=dict(size=18, family="Arial", color="black")
     )])
     fig.update_layout(
-        title={'text': f"Parallel Coordinates – {pretty_aoi(selected_aoi)}", 'font': {'size': 32, 'family': "Arial", 'color': "#222"}},
-        margin=dict(t=130),
-        font=dict(size=20, family="Arial", color="black")
+        title=f"Parallel Coordinates – {pretty_aoi(selected_aoi)}",
+        margin=dict(t=95)
     )
     return fig
 
@@ -157,7 +151,7 @@ app.layout = html.Div([
             options=[{"label": AOI_TITLES[aoi], "value": aoi} for aoi in AOI_LIST],
             value=AOI_LIST[0],
             clearable=False,
-            style={"width": "85%", "margin-bottom": "15px", "fontWeight": "bold", "fontSize":"1.1rem"}
+            style={"width": "85%", "margin-bottom": "15px", "fontWeight": "bold"}
         ),
         dcc.Graph(id="cockpit-image"),
     ], style={'flex': '1', 'min-width': "450px", 'padding': '20px', "background":"#f6f6fa"}),
