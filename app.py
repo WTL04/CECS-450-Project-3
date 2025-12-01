@@ -20,13 +20,13 @@ def pretty_aoi(aoi): return AOI_TITLES.get(aoi, aoi.replace("_", " ").title())
 
 AOI_LIST = list(AOI_TITLES.keys())
 AOI_COORDS = {
-    "AI":      {"x0": 402, "y0": 225, "x1": 482, "y1": 305, "label":AOI_TITLES["AI"]},
-    "Alt_VSI": {"x0": 502, "y0": 225, "x1": 582, "y1": 305, "label":AOI_TITLES["Alt_VSI"]},
-    "ASI":     {"x0": 402, "y0": 325, "x1": 482, "y1": 405, "label":AOI_TITLES["ASI"]},
-    "SSI":     {"x0": 502, "y0": 325, "x1": 582, "y1": 405, "label":AOI_TITLES["SSI"]},
-    "TI_HSI":  {"x0": 452, "y0": 425, "x1": 532, "y1": 504, "label":AOI_TITLES["TI_HSI"]},
-    "RPM":     {"x0": 700, "y0": 225, "x1": 830, "y1": 335, "label":AOI_TITLES["RPM"]},
-    "Window":  {"x0": 20, "y0": 20, "x1": 880, "y1": 170, "label":AOI_TITLES["Window"]},
+    "AI":      {"x0": 383, "y0": 110, "x1": 491, "y1": 160, "label":AOI_TITLES["AI"]},
+    "Alt_VSI": {"x0": 497, "y0": 67, "x1": 568, "y1": 200, "label":AOI_TITLES["Alt_VSI"]},
+    "ASI":     {"x0": 323, "y0": 75, "x1": 376, "y1": 191, "label":AOI_TITLES["ASI"]},
+    "SSI":     {"x0": 383, "y0": 165, "x1": 491, "y1": 200, "label":AOI_TITLES["SSI"]},
+    "TI_HSI":  {"x0": 383, "y0": 0, "x1": 492, "y1": 105, "label":AOI_TITLES["TI_HSI"]},
+    "RPM":     {"x0": 790, "y0": 150, "x1": 855, "y1": 220, "label":AOI_TITLES["RPM"]},
+    "Window":  {"x0": 0, "y0": 700, "x1": 1000, "y1": 280, "label":AOI_TITLES["Window"]},
 }
 DATA_PATH = "./datasets/AOI_DGMs.csv"
 
@@ -38,19 +38,31 @@ def get_base64_image(image_path):
         return base64.b64encode(f.read()).decode()
 
 def cockpit_figure(selected_aoi):
+
+    # display cockpit image
     encoded_image = get_base64_image(COCKPIT_IMAGE_PATH)
     fig = go.Figure()
     if encoded_image:
-        fig.add_layout_image(dict(
-            source=f"data:image/png;base64,{encoded_image}",
-            xref="x", yref="y",
-            x=0, y=0,
-            sizex=IMAGE_WIDTH, sizey=IMAGE_HEIGHT,
-            layer="below"
-        ))
+        fig.add_layout_image(
+            dict(
+                source=f"data:image/png;base64,{encoded_image}",
+                xref="x",
+                yref="y",
+                x=0,
+                y=IMAGE_HEIGHT,
+                sizex=IMAGE_WIDTH,
+                sizey=IMAGE_HEIGHT,
+                xanchor="left",
+                yanchor="top",
+                sizing="stretch",
+                layer="below"
+            )
+        )
+
+    # display AOI boxes on top of cockpit image
     for aoi, coords in AOI_COORDS.items():
         boxcolor = "#32CD32" if aoi == selected_aoi else "#FF6347"
-        opacity = 0.32 if aoi == selected_aoi else 0.14
+        opacity = 0.5 if aoi == selected_aoi else 0.30
         fig.add_shape(
             type="rect",
             x0=coords["x0"], y0=coords["y0"],
@@ -59,15 +71,7 @@ def cockpit_figure(selected_aoi):
             fillcolor=boxcolor,
             opacity=opacity,
         )
-        fig.add_annotation(
-            x=(coords["x0"] + coords["x1"]) / 2,
-            y=(coords["y0"] + coords["y1"]) / 2,
-            text=coords["label"].split("(")[0].replace("/"," "),
-            showarrow=False,
-            font=dict(size=16, color='white' if aoi == selected_aoi else 'black', family="Arial"),
-            bgcolor=boxcolor,
-            opacity=0.95,
-        )
+
     fig.update_xaxes(visible=False, range=[0, IMAGE_WIDTH])
     fig.update_yaxes(visible=False, range=[0, IMAGE_HEIGHT])
     fig.update_layout(
@@ -154,7 +158,7 @@ app.layout = html.Div([
             style={"width": "85%", "margin-bottom": "15px", "fontWeight": "bold"}
         ),
         dcc.Graph(id="cockpit-image"),
-    ], style={'flex': '1', 'min-width': "450px", 'padding': '20px', "background":"#f6f6fa"}),
+    ], style={'flex': '1', 'min-width': "1050px", 'padding': '20px', "background":"#f6f6fa"}),
     html.Div([
         dcc.Graph(id="bar-chart", config={"displayModeBar": False}),
         dcc.Graph(id="main-chart", config={"displayModeBar": False}),
@@ -168,16 +172,8 @@ app.layout = html.Div([
     Input('aoi-dropdown', 'value')
 )
 def update_all(selected_aoi):
-    return (
-        cockpit_figure(selected_aoi),
-        build_bar_figure(selected_aoi),
-        build_main_figure(selected_aoi)
-    )
+    return (cockpit_figure(selected_aoi), build_bar_figure(selected_aoi), build_main_figure(selected_aoi))
 
-import webbrowser, threading, time
+
 if __name__ == "__main__":
-    def open_browser():
-        time.sleep(1)
-        webbrowser.open("http://127.0.0.1:8050/")
-    threading.Thread(target=open_browser).start()
     app.run(debug=True)
