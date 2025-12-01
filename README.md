@@ -5,4 +5,4 @@ It combines data preprocessing, pattern extraction, proportional frequency analy
 
 ## 📽 Slide Presentation  
 The slides for this project can be viewed here:  
-👉 **[Project 3 Presentation Slides](https://www.canva.com/design/DAG6HmezeNw/Up0wsJshBNw5P9UURa0LwA/edit?utm_content=DAG6HmezeNw&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton)**
+**[Project 3 Presentation Slides](https://www.canva.com/design/DAG6HmezeNw/Up0wsJshBNw5P9UURa0LwA/edit?utm_content=DAG6HmezeNw&utm_campaign=designshare&utm_medium=link2&utm_source=sharebutton)**
