@@ -2,6 +2,7 @@ import dash
 from dash import dcc, html, Input, Output
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
+import plotly.express as px
 import base64, os
 import pandas as pd
 import numpy as np
@@ -30,14 +31,24 @@ AOI_COORDS = {
     "RPM":     {"x0": 790, "y0": 150, "x1": 855, "y1": 220, "label":AOI_TITLES["RPM"]},
     "Window":  {"x0": 0, "y0": 700, "x1": 1000, "y1": 280, "label":AOI_TITLES["Window"]},
 }
+
 DATA_PATH = "./datasets/AOI_DGMs.csv"
 PATTERN_DATA_PATH = "./datasets/Collapsed Patterns (Group).xlsx"
+COLLAPSED_FILE = "./datasets/Collapsed Patterns (Group).xlsx"
+EXPANDED_FILE = "./datasets/Expanded Patterns (Group).xlsx"
 
-# Consistent color scheme for success/unsuccessful groups
-SUCCESS_COLOR = "#2ecc71"  # green
-UNSUCCESS_COLOR = "#e74c3c"  # red
+SUCCESS_COLOR = "#2ecc71" 
+UNSUCCESS_COLOR = "#e74c3c" 
+COLOR_MAP = {
+    "Successful": SUCCESS_COLOR,
+    "Unsuccessful": UNSUCCESS_COLOR,
+}
 
-# AOI mapping for scan patterns
+COLOR_MAP_DIFF = {
+    "Successful > Unsuccessful": SUCCESS_COLOR,
+    "Unsuccessful > Successful": UNSUCCESS_COLOR,
+}
+
 PATTERN_AOI_MAP = {
     'B': 'Alt_VSI',
     'C': 'AI',
@@ -47,6 +58,334 @@ PATTERN_AOI_MAP = {
     'G': 'RPM'
 }
 
+AOI_LEGEND = {
+    "A": "No AOI",
+    "B": "Alt_VSI",
+    "C": "AI",
+    "D": "TI_HSI",
+    "E": "SSI",
+    "F": "ASI",
+    "G": "RPM",
+    "H": "Window",
+}
+
+def load_patterns(excel_path: str, pattern_type: str) -> pd.DataFrame:
+    xls = pd.ExcelFile(excel_path)
+    frames = []
+
+    for sheet in xls.sheet_names:
+        df = xls.parse(sheet)
+
+        if "Succesful" in sheet:
+            group = "Successful"
+        else:
+            group = "Unsuccessful"
+
+        if "Excluding" in sheet:
+            aoi_filter = "Exclude No AOI (A)"
+        else:
+            aoi_filter = "All AOIs"
+        df["Group"] = group
+        df["AOI_Filter"] = aoi_filter
+        df["PatternType"] = pattern_type
+        df["Pattern Length"] = df["Pattern String"].astype(str).str.len()
+        frames.append(df)
+    return pd.concat(frames, ignore_index=True)
+
+def top_patterns_bar(df: pd.DataFrame, title: str, top_n: int = 15):
+    totals = (
+        df.groupby("Pattern String")["Frequency"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(top_n)
+    )
+    top_patterns = list(totals.index)
+
+    plot_df = df[df["Pattern String"].isin(top_patterns)].copy()
+    plot_df["Pattern String"] = pd.Categorical(
+        plot_df["Pattern String"],
+        categories=top_patterns,
+        ordered=True,
+    )
+
+    fig = px.bar(
+        plot_df,
+        x="Pattern String",
+        y="Proportional Pattern Frequency",
+        color="Group",
+        barmode="group",
+        title=title,
+        labels={
+            "Pattern String": "AOI Pattern",
+            "Proportional Pattern Frequency": "Proportional Pattern Frequency",
+            "Group": "Approach Outcome",
+        },
+    )
+    for trace in fig.data:
+        group_name = trace.name
+        if group_name in COLOR_MAP:
+            trace.marker.color = COLOR_MAP[group_name]
+
+    fig.update_layout(
+        xaxis_tickangle=-45,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.3,
+            xanchor="center",
+            x=0.5,
+        ),
+    )
+    return fig
+
+def difference_bar(df: pd.DataFrame, title: str, top_each_side: int = 10):
+    pivot = df.pivot_table(
+        index="Pattern String",
+        columns="Group",
+        values="Proportional Pattern Frequency",
+        aggfunc="mean",
+        fill_value=0.0,
+    )
+
+    if "Successful" not in pivot.columns or "Unsuccessful" not in pivot.columns:
+        return px.bar(title=title)
+
+    pivot["Difference"] = pivot["Successful"] - pivot["Unsuccessful"]
+    pivot = pivot[pivot["Difference"] != 0]
+    top_pos = pivot.sort_values("Difference", ascending=False).head(top_each_side)
+    top_neg = pivot.sort_values("Difference", ascending=True).head(top_each_side)
+
+    subset = pd.concat([top_pos, top_neg]).reset_index()
+    subset["Direction"] = subset["Difference"].apply(
+        lambda v: "Successful > Unsuccessful" if v > 0 else "Unsuccessful > Successful"
+    )
+
+    fig = px.bar(
+        subset,
+        x="Pattern String",
+        y="Difference",
+        color="Direction",
+        title=title,
+        labels={
+            "Pattern String": "AOI Pattern",
+            "Difference": "Proportional Frequency (Success - Unsuccess)",
+            "Direction": "Which Group Looks Here More",
+        },
+        color_discrete_map=COLOR_MAP_DIFF,
+    )
+    fig.update_layout(
+        xaxis_tickangle=-45,
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.3,
+            xanchor="center",
+            x=0.5,
+        ),
+    )
+    return fig
+
+def length_hist(df: pd.DataFrame, title: str, top_n: int = 10):
+    totals = (
+        df.groupby(["Pattern Length", "Group"])["Frequency"]
+        .sum()
+        .reset_index(name="TotalFrequency")
+    )
+
+    df_sorted = df.sort_values(
+        ["Pattern Length", "Group", "Frequency"],
+        ascending=[True, True, False]
+    )
+
+    top_patterns = (
+        df_sorted.groupby(["Pattern Length", "Group"], group_keys=False)
+        .head(top_n)
+        .groupby(["Pattern Length", "Group"])
+        .apply(lambda g: "<br>".join(
+            [f"{row['Pattern String']} ({row['Frequency']})"
+             for _, row in g.iterrows()]
+        ))
+        .reset_index(name="PatternDetails")
+    )
+
+    merged = totals.merge(
+        top_patterns,
+        on=["Pattern Length", "Group"],
+        how="left"
+    )
+
+    success_df = merged[merged["Group"] == "Successful"]
+    unsuccess_df = merged[merged["Group"] == "Unsuccessful"]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        name="Successful",
+        x=success_df["Pattern Length"],
+        y=success_df["TotalFrequency"],
+        customdata=success_df["PatternDetails"],
+        marker_color=COLOR_MAP["Successful"],
+        hovertemplate=(
+            "<b>Group:</b> Successful<br>"
+            "<b>Pattern Length:</b> %{x}<br>"
+            "<b>Total Occurrences:</b> %{y}<br><br>"
+            "<b>Top Patterns:</b><br>%{customdata}"
+            "<extra></extra>"
+        )
+    ))
+
+    fig.add_trace(go.Bar(
+        name="Unsuccessful",
+        x=unsuccess_df["Pattern Length"],
+        y=unsuccess_df["TotalFrequency"],
+        customdata=unsuccess_df["PatternDetails"],
+        marker_color=COLOR_MAP["Unsuccessful"],
+        hovertemplate=(
+            "<b>Group:</b> Unsuccessful<br>"
+            "<b>Pattern Length:</b> %{x}<br>"
+            "<b>Total Occurrences:</b> %{y}<br><br>"
+            "<b>Top Patterns:</b><br>%{customdata}"
+            "<extra></extra>"
+        )
+    ))
+
+    fig.update_layout(
+        barmode="group",
+        title=title,
+        xaxis_title="Pattern Length (# AOIs in pattern)",
+        yaxis_title="Total Pattern Occurrences",
+        hovermode="closest",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.3,
+            xanchor="center",
+            x=0.5,
+        ),
+    )
+
+    return fig
+
+def build_aoi_legend_dash():
+    table_rows = [
+        html.Tr([
+            html.Td(html.Strong(letter)),
+            html.Td(desc)
+        ])
+        for letter, desc in AOI_LEGEND.items()
+    ]
+
+    return html.Div(
+        style={
+            "display": "flex",
+            "gap": "32px",
+            "flexWrap": "wrap",
+            "alignItems": "flex-start",
+            "marginTop": "40px",
+            "borderTop": "1px solid #ccc",
+            "paddingTop": "20px",
+        },
+        children=[
+            html.Div([
+                html.H3("AOI Letters"),
+                html.Table([
+                    html.Thead(
+                        html.Tr([
+                            html.Th("Letter"),
+                            html.Th("AOI"),
+                        ])
+                    ),
+                    html.Tbody(table_rows),
+                ], style={
+                    "borderCollapse": "collapse",
+                    "maxWidth": "400px",
+                    "border": "1px solid #ddd",
+                })
+            ]),
+            html.Div([
+                html.H3("Pattern Metrics"),
+                html.Ul([
+                    html.Li([
+                        html.B("Proportional Pattern Frequency"),
+                        ": share of all patterns for a group that match a specific pattern. ",
+                        html.Br(),
+                        "Example: 0.08 for pattern ",
+                        html.B("ADA"),
+                        " means 8% of all patterns for that group are ADA."
+                    ]),
+                    html.Li([
+                        html.B("Proportional Frequency (Success - Unsuccess)"),
+                        ": how much more common a pattern is for successful pilots.",
+                        html.Br(),
+                        "Example: +0.03 for ",
+                        html.B("ADA"),
+                        " means ADA is 3 percentage points more common in successful than unsuccessful approaches ",
+                        "(green bars = more in successful, red = more in unsuccessful)."
+                    ], style={"marginTop": "8px"}),
+                ], style={"maxWidth": "420px"})
+            ])
+        ]
+    )
+
+def build_pattern_figures():
+    figs = []
+
+    if not os.path.exists(COLLAPSED_FILE) or not os.path.exists(EXPANDED_FILE):
+        placeholder = go.Figure().update_layout(
+            title="Pattern analysis files not found in datasets/"
+        )
+        return [placeholder]
+
+    collapsed_df = load_patterns(COLLAPSED_FILE, pattern_type="Collapsed")
+    expanded_df = load_patterns(EXPANDED_FILE, pattern_type="Expanded")
+
+    collapsed_all = collapsed_df[collapsed_df["AOI_Filter"] == "All AOIs"].copy()
+    expanded_all = expanded_df[expanded_df["AOI_Filter"] == "All AOIs"].copy()
+
+    figs.append(
+        top_patterns_bar(
+            collapsed_all,
+            "Top 15 Collapsed Patterns by Proportional Frequency (All AOIs)",
+        )
+    )
+    figs.append(
+        top_patterns_bar(
+            expanded_all,
+            "Top 15 Expanded Patterns by Proportional Frequency (All AOIs)",
+        )
+    )
+    figs.append(
+        difference_bar(
+            collapsed_all,
+            "Collapsed Patterns: Largest Differences in Proportional Frequency "
+            "(Successful − Unsuccessful)",
+        )
+    )
+    figs.append(
+        difference_bar(
+            expanded_all,
+            "Expanded Patterns: Largest Differences in Proportional Frequency "
+            "(Successful − Unsuccessful)",
+        )
+    )
+    figs.append(
+        length_hist(
+            collapsed_all,
+            "Collapsed Patterns: Pattern Length Distribution (Weighted by Frequency)",
+        )
+    )
+    figs.append(
+        length_hist(
+            expanded_all,
+            "Expanded Patterns: Pattern Length Distribution (Weighted by Frequency)",
+        )
+    )
+    return figs
+
+PATTERN_FIGURES = build_pattern_figures()
+
 def get_base64_image(image_path):
     if not os.path.exists(image_path):
         print(f"Image not found: {image_path}")
@@ -55,14 +394,13 @@ def get_base64_image(image_path):
         return base64.b64encode(f.read()).decode()
 
 def cockpit_figure(selected_aoi):
-    SCALE = 0.7 # scale figure size
+    SCALE = 0.7
     encoded_image = get_base64_image(COCKPIT_IMAGE_PATH)
     fig = go.Figure()
 
     scaled_w = IMAGE_WIDTH * SCALE
     scaled_h = IMAGE_HEIGHT * SCALE
 
-    # background image
     if encoded_image:
         fig.add_layout_image(
             dict(
@@ -79,8 +417,6 @@ def cockpit_figure(selected_aoi):
                 layer="below"
             )
         )
-
-    # AOI boxes, scaled
     for aoi, coords in AOI_COORDS.items():
         x0 = coords["x0"] * SCALE
         y0 = coords["y0"] * SCALE
@@ -172,12 +508,10 @@ def build_main_figure(selected_aoi):
     return fig
 
 def build_saccade_metrics_comparison_figure():
-    """2x2 grid of box plots comparing saccade metrics"""
     if not os.path.exists(DATA_PATH):
         return go.Figure().update_layout(title="CSV Not Found")
     df = pd.read_csv(DATA_PATH)
 
-    # Add success category
     if 'Approach_Score' not in df.columns:
         return go.Figure().update_layout(title="Missing Approach_Score column")
 
@@ -233,17 +567,12 @@ def build_saccade_count_by_aoi_figure():
     if not os.path.exists(DATA_PATH):
         return go.Figure().update_layout(title="CSV Not Found for Saccade Count by AOI")
     df = pd.read_csv(DATA_PATH)
-
-    # Check if Approach_Score exists
     if 'Approach_Score' not in df.columns:
         return go.Figure().update_layout(title="Missing Approach_Score column")
 
-    # Add success category
     df['Success_Category'] = df['Approach_Score'].apply(
         lambda x: 'Successful' if pd.notna(x) and x >= 0.7 else 'Unsuccessful'
     )
-
-    # Prepare data for AOI comparison
     aoi_data = []
     for aoi in AOI_LIST:
         col_name = f'{aoi}_total_number_of_saccades'
@@ -289,7 +618,6 @@ def build_saccade_count_by_aoi_figure():
     return fig
 
 def build_scan_transition_differences_figure():
-    """Horizontal diverging bar showing transition differences"""
     if not os.path.exists(PATTERN_DATA_PATH):
         return go.Figure().update_layout(title="Pattern data file not found")
 
@@ -370,7 +698,6 @@ def build_scan_transition_differences_figure():
     return fig
 
 def build_scan_instrument_attention_figure():
-    """Side-by-side view of instrument attention distribution and differences"""
     if not os.path.exists(PATTERN_DATA_PATH):
         return go.Figure().update_layout(title="Pattern data file not found")
 
@@ -544,19 +871,11 @@ def build_scan_efficiency_metrics_figure():
     return fig
 
 def build_comprehensive_metrics_heatmap():
-    """
-    Creates an insightful heatmap showing multiple key metrics across all AOIs,
-    comparing successful vs unsuccessful pilots with difference visualization.
-    """
     if not os.path.exists(DATA_PATH):
         return go.Figure().update_layout(title="CSV Not Found for Heatmap")
 
     df = pd.read_csv(DATA_PATH)
-
-    # Define AOIs (exclude NoAOI as it's not a primary instrument)
     aois = ["AI", "Alt_VSI", "ASI", "SSI", "TI_HSI", "RPM", "Window"]
-
-    # Define key metrics based on project requirements - what distinguishes successful pilots
     metrics = [
         ("Proportion_of_fixations_spent_in_AOI", "Attention Distribution"),
         ("Proportion_of_fixations_durations_spent_in_AOI", "Attention Duration"),
@@ -566,16 +885,13 @@ def build_comprehensive_metrics_heatmap():
         ("mean_saccade_duration", "Saccade Duration (s)"),
     ]
 
-    # Split into successful and unsuccessful groups
     successful = df[df["pilot_success"] == "Successful"]
     unsuccessful = df[df["pilot_success"] == "Unsuccessful"]
 
-    # Build heatmap data
     heatmap_data = []
     y_labels = []
 
     for metric_suffix, metric_label in metrics:
-        # Calculate means for each group
         for success_group, group_label in [(successful, "Successful"), (unsuccessful, "Unsuccessful")]:
             row_data = []
             for aoi in aois:
@@ -588,8 +904,6 @@ def build_comprehensive_metrics_heatmap():
 
             heatmap_data.append(row_data)
             y_labels.append(f"{metric_label} - {group_label}")
-
-        # Calculate difference (Successful - Unsuccessful)
         diff_row = []
         succ_row = heatmap_data[-2]
         unsucc_row = heatmap_data[-1]
@@ -602,36 +916,7 @@ def build_comprehensive_metrics_heatmap():
 
         heatmap_data.append(diff_row)
         y_labels.append(f"{metric_label} - Δ (S - U)")
-
-    # Convert to numpy array for easier manipulation
     heatmap_array = np.array(heatmap_data)
-
-    # Normalize each metric group (3 rows: Successful, Unsuccessful, Delta) separately
-    normalized_data = []
-    for i in range(0, len(heatmap_data), 3):
-        metric_rows = heatmap_array[i:i+3]
-
-        # Normalize Successful and Unsuccessful together for comparability
-        combined = np.concatenate([metric_rows[0], metric_rows[1]])
-        valid_vals = combined[~np.isnan(combined)]
-
-        if len(valid_vals) > 0:
-            vmin, vmax = np.nanmin(combined), np.nanmax(combined)
-            vrange = vmax - vmin if vmax != vmin else 1
-
-            # Normalize successful and unsuccessful rows
-            normalized_data.append(metric_rows[0])
-            normalized_data.append(metric_rows[1])
-
-            # Difference row - center around 0 for diverging colorscale
-            normalized_data.append(metric_rows[2])
-        else:
-            normalized_data.extend([metric_rows[0], metric_rows[1], metric_rows[2]])
-
-    # Create x-axis labels (AOI names)
-    x_labels = [pretty_aoi(aoi) for aoi in aois]
-
-    # Build hover text with actual values
     hover_text = []
     for i, row in enumerate(heatmap_data):
         hover_row = []
@@ -642,13 +927,13 @@ def build_comprehensive_metrics_heatmap():
                 hover_row.append(f"{val:.4f}")
         hover_text.append(hover_row)
 
-    # Create figure with custom colorscale
-    # Use a three-color diverging scale for difference rows, sequential for others
+    x_labels = [pretty_aoi(aoi) for aoi in aois]
+
     fig = go.Figure(data=go.Heatmap(
         z=heatmap_data,
         x=x_labels,
         y=y_labels,
-        colorscale='RdYlGn',  # Red-Yellow-Green diverging colorscale
+        colorscale='RdYlGn',
         text=hover_text,
         texttemplate="%{text}",
         textfont={"size": 9},
@@ -657,11 +942,10 @@ def build_comprehensive_metrics_heatmap():
             title=dict(text="Metric Value", side="right"),
             len=0.7
         ),
-        zmin=-np.nanmax(np.abs(heatmap_array)),  # Center diverging scale
+        zmin=-np.nanmax(np.abs(heatmap_array)), 
         zmax=np.nanmax(np.abs(heatmap_array)),
     ))
 
-    # Add horizontal lines to separate metric groups
     shapes = []
     for i in range(3, len(y_labels), 3):
         shapes.append(dict(
@@ -685,7 +969,6 @@ def build_comprehensive_metrics_heatmap():
         shapes=shapes
     )
 
-    # Reverse y-axis to show metrics from top to bottom
     fig.update_yaxes(autorange="reversed")
 
     return fig
@@ -693,7 +976,6 @@ def build_comprehensive_metrics_heatmap():
 app = dash.Dash(__name__)
 
 app.layout = html.Div([
-    # ========== SECTION 1: AOI-SPECIFIC DASHBOARD ==========
     html.Div([
         html.Div([
             html.H3("AOI-Specific Analysis", style={"margin-bottom": "5px"}),
@@ -721,7 +1003,6 @@ app.layout = html.Div([
         ], style={'flex': '2', 'padding': '50px', 'overflow': 'auto'}),
     ], style={"display": "flex", "flexDirection": "row", "min-height":"50vh", "fontFamily":"Arial", "border-bottom": "3px solid #ccc"}),
 
-    # ========== SECTION 2: CUMULATIVE METRICS DASHBOARD ==========
     html.Div([
         html.H2("Overall Performance Metrics", style={"text-align": "center", "margin": "30px 0 20px 0", "color": "#333"}),
         dcc.Tabs(
@@ -739,9 +1020,51 @@ app.layout = html.Div([
         ),
         dcc.Graph(id="cumulative-graph", config={"displayModeBar": True}, style={"height": "900px"})
     ], style={"padding": "20px 50px 50px 50px", "background": "#fafafa", "min-height":"50vh"}),
+
+    html.Div([
+        html.H2(
+            "Scan Pattern Analysis",
+            style={"textAlign": "center", "margin": "30px 0 10px 0", "color": "#333"}
+        ),
+        html.P(
+            "These charts show which scan patterns are most common, how they differ between "
+            "successful and unsuccessful approaches, and how long those patterns are.",
+            style={"textAlign": "center", "maxWidth": "900px", "margin": "0 auto 30px auto", "color": "#555"}
+        ),
+        dcc.Graph(
+            id="pattern-fig-1",
+            figure=PATTERN_FIGURES[0] if len(PATTERN_FIGURES) > 0 else go.Figure(),
+            style={"height": "550px", "marginBottom": "30px"}
+        ),
+        dcc.Graph(
+            id="pattern-fig-2",
+            figure=PATTERN_FIGURES[1] if len(PATTERN_FIGURES) > 1 else go.Figure(),
+            style={"height": "550px", "marginBottom": "30px"}
+        ),
+        dcc.Graph(
+            id="pattern-fig-3",
+            figure=PATTERN_FIGURES[2] if len(PATTERN_FIGURES) > 2 else go.Figure(),
+            style={"height": "550px", "marginBottom": "30px"}
+        ),
+        dcc.Graph(
+            id="pattern-fig-4",
+            figure=PATTERN_FIGURES[3] if len(PATTERN_FIGURES) > 3 else go.Figure(),
+            style={"height": "550px", "marginBottom": "30px"}
+        ),
+        dcc.Graph(
+            id="pattern-fig-5",
+            figure=PATTERN_FIGURES[4] if len(PATTERN_FIGURES) > 4 else go.Figure(),
+            style={"height": "550px", "marginBottom": "30px"}
+        ),
+        dcc.Graph(
+            id="pattern-fig-6",
+            figure=PATTERN_FIGURES[5] if len(PATTERN_FIGURES) > 5 else go.Figure(),
+            style={"height": "550px", "marginBottom": "30px"}
+        ),
+        build_aoi_legend_dash(),
+    ], style={"padding": "20px 50px 60px 50px", "background": "#ffffff", "min-height":"50vh"}),
 ], style={"fontFamily":"Arial"})
 
-# Callback for AOI-specific dashboard
 @app.callback(
     Output('cockpit-image', 'figure'),
     Output('aoi-graph', 'figure'),
@@ -760,7 +1083,6 @@ def update_aoi_dashboard(selected_aoi, selected_tab):
 
     return cockpit_fig, viz_fig
 
-# Callback for cumulative metrics dashboard
 @app.callback(
     Output('cumulative-graph', 'figure'),
     Input('cumulative-tabs', 'value'),
